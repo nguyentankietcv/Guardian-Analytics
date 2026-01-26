@@ -20,10 +20,11 @@ client/src/
 ├── components/
 │   ├── ui/          # Shadcn UI components
 │   ├── Header.tsx   # Navigation header with TMA logo
-│   ├── Hero.tsx     # Hero section with product intro
-│   ├── Features.tsx # Key features showcase
+│   ├── Hero.tsx     # Hero section with product intro and animations
+│   ├── Features.tsx # Key features showcase with scroll animations
 │   ├── Architecture.tsx # How it works section
-│   └── Footer.tsx   # Footer with contact info
+│   ├── Footer.tsx   # Footer with contact info
+│   └── TMALogo.tsx  # TMA Innovation branded logo component
 ├── pages/
 │   ├── Home.tsx     # Main landing page
 │   └── not-found.tsx
