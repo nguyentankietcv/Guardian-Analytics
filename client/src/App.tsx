@@ -40,15 +40,15 @@ export default function App() {
           <div className="flex h-screen w-full">
             <AppSidebar />
             <div className="flex flex-col flex-1 overflow-hidden">
-              <header className="flex items-center justify-between gap-4 p-3 border-b bg-background" data-testid="header-main">
+              <header className="flex items-center justify-between gap-4 px-4 py-3 bg-gradient-to-r from-[#0573FD] to-[#1EB2FF]" data-testid="header-main">
                 <div className="flex items-center gap-3">
-                  <SidebarTrigger data-testid="button-sidebar-toggle" />
+                  <SidebarTrigger className="text-white hover:bg-white/10" data-testid="button-sidebar-toggle" />
                   <div className="flex items-center gap-2">
-                    <Shield className="w-5 h-5 text-primary" />
-                    <span className="text-sm font-medium text-foreground" data-testid="text-header-title">T-GUARDIAN Dashboard</span>
+                    <Shield className="w-5 h-5 text-white" />
+                    <span className="text-sm font-semibold text-white" data-testid="text-header-title">T-GUARDIAN Dashboard</span>
                   </div>
                 </div>
-                <TMALogo variant="dark" size="sm" testId="tma-logo-header" />
+                <TMALogo variant="light" size="sm" testId="tma-logo-header" />
               </header>
               <main className="flex-1 overflow-auto bg-muted/30">
                 <Router />

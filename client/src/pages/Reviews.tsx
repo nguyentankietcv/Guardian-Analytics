@@ -58,8 +58,8 @@ export default function Reviews() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground" data-testid="text-page-title">Human Review Queue</h1>
-          <p className="text-muted-foreground">LLM-assisted transaction review with AI recommendations</p>
+          <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Human Review Queue</h1>
+          <p className="text-base text-[#9F9F9F]">LLM-assisted transaction review with AI recommendations</p>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="gap-1">

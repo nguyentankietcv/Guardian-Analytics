@@ -64,8 +64,8 @@ export default function Transactions() {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-foreground" data-testid="text-page-title">Transactions</h1>
-        <p className="text-muted-foreground">Monitor and review all financial transactions</p>
+        <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Transactions</h1>
+        <p className="text-base text-[#9F9F9F]">Monitor and review all financial transactions</p>
       </div>
 
       <Card data-testid="card-transactions-table">

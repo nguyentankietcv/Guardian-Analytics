@@ -16,8 +16,8 @@ export default function Settings() {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-foreground" data-testid="text-page-title">Settings</h1>
-        <p className="text-muted-foreground">Configure T-GUARDIAN detection parameters and alerts</p>
+        <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Settings</h1>
+        <p className="text-base text-[#9F9F9F]">Configure T-GUARDIAN detection parameters and alerts</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

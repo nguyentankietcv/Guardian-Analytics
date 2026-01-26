@@ -18,7 +18,15 @@
 
   --foreground: 0 0% 4%;
 
-  --border: 210 14% 89%;
+  --border: 0 0% 73%;
+
+  --tma-text: #090909;
+  --tma-hint: #BDBEBE;
+  --tma-input-border: #BBBBBB;
+  --tma-disabled: #9F9F9F;
+  --tma-bg-section: #FAFAFA;
+  --tma-bg-frame: #F6F6F6;
+  --tma-light-blue: #739BF4;
 
   --card: 0 0% 100%;
 
@@ -26,17 +34,17 @@
 
   --card-border: 210 14% 89%;
 
-  --sidebar: 203 100% 97%;
+  --sidebar: 0 0% 100%;
 
   --sidebar-foreground: 0 0% 4%;
 
-  --sidebar-border: 210 14% 89%;
+  --sidebar-border: 0 0% 90%;
 
   --sidebar-primary: 203 100% 56%;
 
   --sidebar-primary-foreground: 0 0% 100%;
 
-  --sidebar-accent: 203 60% 94%;
+  --sidebar-accent: 203 85% 95%;
 
   --sidebar-accent-foreground: 203 100% 40%;
 
@@ -56,9 +64,9 @@
 
   --secondary-foreground: 0 0% 20%;
 
-  --muted: 0 0% 96%;
+  --muted: 0 0% 98%;
 
-  --muted-foreground: 0 0% 45%;
+  --muted-foreground: 0 0% 38%;
 
   --accent: 203 60% 94%;
 

@@ -54,16 +54,16 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="p-4">
-        <div className="flex flex-col gap-2" data-testid="sidebar-logo">
+      <SidebarHeader className="p-4 border-b border-sidebar-border">
+        <div className="flex flex-col gap-3" data-testid="sidebar-logo">
           <TMALogo variant="dark" size="sm" testId="tma-logo-sidebar" />
-          <div className="flex items-center gap-2 mt-1">
-            <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
+          <div className="flex items-center gap-2 px-1 py-2 rounded-md bg-gradient-to-r from-[#0573FD] to-[#1EB2FF]">
+            <div className="w-7 h-7 rounded bg-white/20 flex items-center justify-center">
               <Shield className="w-4 h-4 text-white" />
             </div>
             <div className="flex flex-col">
-              <span className="text-sm font-bold text-foreground">T-GUARDIAN</span>
-              <span className="text-[10px] text-muted-foreground">Transaction Guardian</span>
+              <span className="text-sm font-semibold text-white">T-GUARDIAN</span>
+              <span className="text-[10px] text-white/70">Transaction Guardian</span>
             </div>
           </div>
         </div>
@@ -90,9 +90,9 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-4">
+      <SidebarFooter className="p-4 border-t border-sidebar-border">
         <div className="text-xs text-muted-foreground" data-testid="sidebar-footer">
-          TMA Innovation
+          TMA Solutions CO., LTD.
         </div>
       </SidebarFooter>
     </Sidebar>

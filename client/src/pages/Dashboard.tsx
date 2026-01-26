@@ -40,11 +40,11 @@ export default function Dashboard() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground" data-testid="text-page-title">Dashboard</h1>
-          <p className="text-muted-foreground">Real-time transaction monitoring and fraud detection</p>
+          <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Dashboard</h1>
+          <p className="text-base text-[#9F9F9F]">Real-time transaction monitoring and fraud detection</p>
         </div>
-        <Badge variant="outline" className="gap-1" data-testid="badge-live">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+        <Badge variant="outline" className="gap-1 border-[#00A307] text-[#00A307]" data-testid="badge-live">
+          <span className="w-2 h-2 rounded-full bg-[#00A307] animate-pulse" />
           Live
         </Badge>
       </div>

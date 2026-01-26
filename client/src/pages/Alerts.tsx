@@ -76,8 +76,8 @@ export default function Alerts() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground" data-testid="text-page-title">Alerts</h1>
-          <p className="text-muted-foreground">Risk alerts requiring attention</p>
+          <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Alerts</h1>
+          <p className="text-base text-[#9F9F9F]">Risk alerts requiring attention</p>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="gap-1">
