@@ -11,6 +11,7 @@ import {
   SidebarHeader,
   SidebarFooter,
 } from "@/components/ui/sidebar";
+import { TMALogo } from "@/components/TMALogo";
 import { 
   LayoutDashboard, 
   CreditCard, 
@@ -54,13 +55,16 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
-        <div className="flex items-center gap-3" data-testid="sidebar-logo">
-          <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
-            <Shield className="w-6 h-6 text-white" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-lg font-bold text-foreground">T-GUARDIAN</span>
-            <span className="text-xs text-muted-foreground">Transaction Guardian</span>
+        <div className="flex flex-col gap-2" data-testid="sidebar-logo">
+          <TMALogo variant="dark" size="sm" testId="tma-logo-sidebar" />
+          <div className="flex items-center gap-2 mt-1">
+            <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
+              <Shield className="w-4 h-4 text-white" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-foreground">T-GUARDIAN</span>
+              <span className="text-[10px] text-muted-foreground">Transaction Guardian</span>
+            </div>
           </div>
         </div>
       </SidebarHeader>

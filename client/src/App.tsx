@@ -5,6 +5,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
+import { TMALogo } from "@/components/TMALogo";
+import { Shield } from "lucide-react";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
@@ -38,9 +40,15 @@ export default function App() {
           <div className="flex h-screen w-full">
             <AppSidebar />
             <div className="flex flex-col flex-1 overflow-hidden">
-              <header className="flex items-center gap-2 p-3 border-b bg-background">
-                <SidebarTrigger data-testid="button-sidebar-toggle" />
-                <span className="text-sm text-muted-foreground">T-GUARDIAN Dashboard</span>
+              <header className="flex items-center justify-between gap-4 p-3 border-b bg-background" data-testid="header-main">
+                <div className="flex items-center gap-3">
+                  <SidebarTrigger data-testid="button-sidebar-toggle" />
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-primary" />
+                    <span className="text-sm font-medium text-foreground" data-testid="text-header-title">T-GUARDIAN Dashboard</span>
+                  </div>
+                </div>
+                <TMALogo variant="dark" size="sm" testId="tma-logo-header" />
               </header>
               <main className="flex-1 overflow-auto bg-muted/30">
                 <Router />

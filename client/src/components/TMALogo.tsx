@@ -1,9 +1,10 @@
 interface TMALogoProps {
   variant?: "light" | "dark";
   size?: "sm" | "md" | "lg";
+  testId?: string;
 }
 
-export function TMALogo({ variant = "light", size = "md" }: TMALogoProps) {
+export function TMALogo({ variant = "light", size = "md", testId = "tma-logo" }: TMALogoProps) {
   const sizeClasses = {
     sm: "h-8",
     md: "h-10",
@@ -16,7 +17,7 @@ export function TMALogo({ variant = "light", size = "md" }: TMALogoProps) {
   const globeBgColor = variant === "light" ? "rgba(255,255,255,0.3)" : "rgba(30,160,255,0.3)";
 
   return (
-    <div className={`flex items-center gap-1 ${sizeClasses[size]}`} data-testid="tma-logo">
+    <div className={`flex items-center gap-1 ${sizeClasses[size]}`} data-testid={testId}>
       <div className="flex items-baseline">
         <span className={`text-2xl font-bold ${textColor} tracking-tight`}>TMA</span>
       </div>
