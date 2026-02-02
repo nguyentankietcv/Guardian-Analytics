@@ -57,13 +57,13 @@ export function AppSidebar() {
       <SidebarHeader className="p-4 border-b border-sidebar-border">
         <div className="flex flex-col gap-3" data-testid="sidebar-logo">
           <TMALogo variant="dark" size="sm" testId="tma-logo-sidebar" />
-          <div className="flex items-center gap-2 px-1 py-2 rounded-md bg-gradient-to-r from-[#0573FD] to-[#1EB2FF]">
-            <div className="w-7 h-7 rounded bg-white/20 flex items-center justify-center">
-              <Shield className="w-4 h-4 text-white" />
+          <div className="flex items-center gap-3 px-3 py-2.5 rounded-md bg-gradient-to-r from-[#0573FD] to-[#1EB2FF]">
+            <div className="w-8 h-8 rounded bg-white/20 flex items-center justify-center flex-shrink-0">
+              <Shield className="w-5 h-5 text-white" />
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold text-white">T-GUARDIAN</span>
-              <span className="text-[10px] text-white/70">Transaction Guardian</span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-sm font-bold text-white tracking-wide">T-GUARDIAN</span>
+              <span className="text-xs text-white/80">Transaction Guardian</span>
             </div>
           </div>
         </div>
