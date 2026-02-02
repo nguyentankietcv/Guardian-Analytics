@@ -1,0 +1,849 @@
+import os
+import sys
+import zmq
+import uvicorn
+import psutil
+from pathlib import Path
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, List, Any
+from decimal import Decimal
+from datetime import datetime, timezone
+
+current_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(current_dir))
+
+from query import (
+    get_dashboard_stats, 
+    get_recent_verdicts, 
+    get_flagged_alerts, 
+    get_human_review_queue, 
+    get_transaction_history, 
+    update_verdict_status, 
+    get_24h_transaction_trends
+)
+from init_db import NotificationSettings, DetectionSettings, DataIntegrationSettings, LLMReview, Transaction, Verdict
+from sqlalchemy import create_engine, text, desc, func, select
+from sqlalchemy.orm import sessionmaker
+
+load_dotenv()
+
+LOG_PORT = int(os.getenv("LOG_PORT", "8004"))
+LOCALHOST = os.getenv("LOCALHOST", "localhost")
+QUERY_PORT = int(os.getenv("QUERY_PORT", "9000"))
+DB_URL = os.getenv("DB_URL", "postgresql://postgres:postgres@localhost:5432/t-guardian")
+EXPECTED_SERVICES = [
+    "module_logging",
+    "module_flagger",
+    "module_ai_check",
+    "module_preprocessing",
+    "module_deduplication",
+    "module_ingestion",
+    "module_rule_check",
+    "module_query"
+]
+
+# Create database engine with error handling
+try:
+    engine = create_engine(DB_URL, echo=False)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    print(f"[QUERY] Database engine created: {DB_URL}")
+except Exception as e:
+    print(f"[ERROR] Failed to create database engine: {e}")
+    print(f"[ERROR] DB_URL: {DB_URL}")
+    raise
+
+logger: Optional[zmq.Socket] = None
+
+def get_logger_socket():
+    global logger
+    if logger is not None: return logger
+    
+    # Retry logic for logger connection
+    import time
+    max_retries = 3
+    retry_delay = 0.5  # 500ms delay between retries
+    
+    for attempt in range(max_retries):
+        try:
+            ctx = zmq.Context()
+            sock = ctx.socket(zmq.PUSH)
+            sock.setsockopt(zmq.LINGER, 1000)
+            sock.connect(f"tcp://{LOCALHOST}:{LOG_PORT}")
+            logger = sock
+            return logger
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                # Failed after all retries - print to stderr for debugging
+                import sys
+                print(f"[QUERY] Failed to connect to logger after {max_retries} attempts", file=sys.stderr)
+                return None
+
+def send_log(sock, level: str, msg: str, service: str = "QUERY"):
+    if sock is None:
+        # If socket is unavailable, try to get a new one
+        import sys
+        sock = get_logger_socket()
+        if sock is None:
+            print(f"[{service}] {level}: {msg}", file=sys.stderr)
+            return
+    
+    try:
+        sock.send_json({"service": service, "level": level, "message": msg}, flags=zmq.NOBLOCK)
+    except zmq.ZMQError as e:
+        # Socket error - try to reconnect on next attempt
+        global logger
+        logger = None
+
+def serialize(data):
+    if isinstance(data, list):
+        return [serialize(item) for item in data]
+    if hasattr(data, "_asdict"):
+        data = data._asdict()
+    if isinstance(data, dict):
+        return {k: serialize(v) for k, v in data.items()}
+    if isinstance(data, Decimal):
+        return float(data)
+    if isinstance(data, datetime):
+        return data.isoformat()
+    return data
+
+def check_pipeline_health():
+    """Scans running processes to verify if pipeline modules are active."""
+    service_status = {name: "OFFLINE" for name in EXPECTED_SERVICES}
+    
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = proc.info.get('cmdline')
+                if cmdline:
+                    cmd_str = " ".join(cmdline)
+                    for service in EXPECTED_SERVICES:
+                        # Check if the service script is in the command line arguments
+                        if service in cmd_str:
+                            service_status[service] = "ONLINE"
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception as e:
+        send_log(get_logger_socket(), "ERROR", f"Health check failed: {e}")
+        
+    return service_status
+
+app = FastAPI()
+
+class VerdictUpdateRequest(BaseModel):
+    transaction_id: str
+    action: str
+    reason: Optional[str] = None
+
+
+class NotificationSettingsRequest(BaseModel):
+    critical_alert_emails_enabled: Optional[bool] = None
+    high_priority_notifications_enabled: Optional[bool] = None
+    alert_email_address: Optional[str] = None
+    daily_summary_report_enabled: Optional[bool] = None
+    slack_webhook_url: Optional[str] = None
+    sms_phone_number: Optional[str] = None
+    risk_score_threshold_for_critical: Optional[float] = None
+    risk_score_threshold_for_high: Optional[float] = None
+
+
+class DetectionSettingsRequest(BaseModel):
+    risk_score_threshold: Optional[float] = None  # 0-100
+    duplicate_detection_window_hours: Optional[int] = None
+    ai_enhanced_detection_enabled: Optional[bool] = None
+
+
+class DataIntegrationSettingsRequest(BaseModel):
+    external_api_url: Optional[str] = None
+
+
+class ReviewApprovalRequest(BaseModel):
+    transaction_id: str
+    approved: bool
+    verdict_action: str = "SAFE"  # SAFE or FRAUD - to update the verdict
+    reviewer_notes: Optional[str] = None
+
+
+class SendToLLMRequest(BaseModel):
+    transaction_id: str
+    reason: Optional[str] = None
+
+
+class TransactionFilterRequest(BaseModel):
+    status: Optional[str] = None  # SAFE, WARN, FRAUD
+    min_amount: Optional[float] = None
+    max_amount: Optional[float] = None
+    location: Optional[str] = None
+    transaction_type: Optional[str] = None
+    date_from: Optional[str] = None  # ISO format
+    date_to: Optional[str] = None    # ISO format
+    page: int = 1
+    per_page: int = 20
+
+# Initialize logger at startup
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    global logger
+    logger = get_logger_socket()
+    send_log(logger, "INFO", "Query API started")
+    yield
+    # Shutdown
+    if logger:
+        send_log(logger, "INFO", "Query API shutting down")
+        logger.close()
+
+app = FastAPI(lifespan=lifespan)
+
+# Add CORS middleware to allow React frontend to access API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (or specify ["http://localhost:3000"] for production)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/dashboard/stats")
+def dashboard_stats(response: Response):
+    try:
+        response.headers["Cache-Control"] = "public, max-age=5"
+        data = get_dashboard_stats()
+        send_log(logger, "DEBUG", "Fetched dashboard stats")
+        return {"status": "success", "data": serialize(data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Stats failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+@app.get("/dashboard/trends")
+def dashboard_trends(response: Response):
+    try:
+        response.headers["Cache-Control"] = "public, max-age=60"
+        data = get_24h_transaction_trends()
+        return {"status": "success", "data": data}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Trends failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+@app.get("/dashboard/recent")
+def recent_verdicts(limit: int = 5):
+    try:
+        data = get_recent_verdicts(limit)
+        return {"status": "success", "data": serialize(data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Recent verdicts failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+@app.get("/alerts")
+def alerts(min_score: float = 0.7, status: Optional[str] = None, page: int = 1, per_page: int = 20):
+    try:
+        data = get_flagged_alerts(min_score, status)
+        total_count = len(data)
+        
+        # Apply pagination
+        offset = (page - 1) * per_page
+        paginated_data = data[offset:offset + per_page]
+        
+        return {"status": "success", "count": len(paginated_data), "total": total_count, "page": page, "per_page": per_page, "data": serialize(paginated_data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Alerts failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+@app.get("/reviews")
+def review_queue(page: int = 1, per_page: int = 20):
+    try:
+        data = get_human_review_queue()
+        total_count = len(data)
+        
+        # Apply pagination
+        offset = (page - 1) * per_page
+        paginated_data = data[offset:offset + per_page]
+        
+        return {"status": "success", "count": len(paginated_data), "total": total_count, "page": page, "per_page": per_page, "data": serialize(paginated_data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Review queue failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+@app.get("/transactions")
+def transactions(page: int = 1, per_page: int = 20, search: Optional[str] = None, status: Optional[str] = None):
+    try:
+        data = get_transaction_history(page, per_page, search, status)
+        return {"status": "success", "count": len(data), "page": page, "data": serialize(data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"History failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+@app.post("/verdict/update")
+def update_verdict(req: VerdictUpdateRequest):
+    try:
+        success = update_verdict_status(req.transaction_id, req.action, req.reason)
+        if success:
+            send_log(logger, "INFO", f"Updated verdict {req.transaction_id} to {req.action}")
+            return {"status": "success", "message": "Verdict updated"}
+        raise HTTPException(404, "Transaction not found")
+    except Exception as e:
+        send_log(logger, "ERROR", f"Update failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+@app.get("/system/health")
+def system_health(response: Response):
+    try:
+        # Short cache to prevent spamming psutil
+        response.headers["Cache-Control"] = "public, max-age=2"
+        status = check_pipeline_health()
+        
+        # Calculate overall system state
+        online_count = sum(1 for s in status.values() if s == "ONLINE")
+        total_count = len(EXPECTED_SERVICES)
+        system_state = "HEALTHY" if online_count == total_count else "DEGRADED"
+        
+        return {
+            "status": "success", 
+            "system_state": system_state,
+            "modules": status
+        }
+    except Exception as e:
+        send_log(logger, "ERROR", f"Health check failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/settings/notifications")
+def get_notification_settings():
+    """Retrieve current notification settings."""
+    try:
+        session = SessionLocal()
+        settings = session.query(NotificationSettings).first()
+        session.close()
+        
+        if not settings:
+            return {
+                "status": "success",
+                "data": {
+                    "id": None,
+                    "critical_alert_emails_enabled": True,
+                    "high_priority_notifications_enabled": True,
+                    "daily_summary_report_enabled": False,
+                    "risk_score_threshold_for_critical": 0.80,
+                    "risk_score_threshold_for_high": 0.70,
+                }
+            }
+        
+        return {
+            "status": "success",
+            "data": {
+                "id": settings.id,
+                "critical_alert_emails_enabled": bool(settings.critical_alert_emails_enabled),
+                "high_priority_notifications_enabled": bool(settings.high_priority_notifications_enabled),
+                "daily_summary_report_enabled": bool(settings.daily_summary_report_enabled),
+                "risk_score_threshold_for_critical": settings.risk_score_threshold_for_critical,
+                "risk_score_threshold_for_high": settings.risk_score_threshold_for_high,
+                "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
+            }
+        }
+    except Exception as e:
+        send_log(logger, "ERROR", f"Failed to get notification settings: {e}")
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/settings/notifications")
+def update_notification_settings(req: NotificationSettingsRequest):
+    """Update notification settings."""
+    try:
+        session = SessionLocal()
+        settings = session.query(NotificationSettings).first()
+        
+        if not settings:
+            settings = NotificationSettings()
+            session.add(settings)
+        
+        # Update only provided fields
+        if req.critical_alert_emails_enabled is not None:
+            settings.critical_alert_emails_enabled = int(req.critical_alert_emails_enabled)
+        
+        if req.high_priority_notifications_enabled is not None:
+            settings.high_priority_notifications_enabled = int(req.high_priority_notifications_enabled)
+        
+        if req.alert_email_address is not None:
+            # Validate email format
+            if "@" not in req.alert_email_address or "." not in req.alert_email_address.split("@")[-1]:
+                raise ValueError("Invalid email address format")
+            settings.alert_email_address = req.alert_email_address
+        
+        if req.daily_summary_report_enabled is not None:
+            settings.daily_summary_report_enabled = int(req.daily_summary_report_enabled)
+        
+        if req.slack_webhook_url is not None:
+            # Validate webhook URL format
+            if not req.slack_webhook_url.startswith("https://"):
+                raise ValueError("Webhook URL must use HTTPS")
+            settings.slack_webhook_url = req.slack_webhook_url
+        
+        if req.sms_phone_number is not None:
+            # Basic phone number validation
+            if not req.sms_phone_number.replace("+", "").replace("-", "").replace(" ", "").isdigit():
+                raise ValueError("Invalid phone number format")
+            settings.sms_phone_number = req.sms_phone_number
+        
+        if req.risk_score_threshold_for_critical is not None:
+            if not (0.0 <= req.risk_score_threshold_for_critical <= 1.0):
+                raise ValueError("Critical threshold must be between 0.0 and 1.0")
+            settings.risk_score_threshold_for_critical = req.risk_score_threshold_for_critical
+        
+        if req.risk_score_threshold_for_high is not None:
+            if not (0.0 <= req.risk_score_threshold_for_high <= 1.0):
+                raise ValueError("High threshold must be between 0.0 and 1.0")
+            settings.risk_score_threshold_for_high = req.risk_score_threshold_for_high
+        
+        session.commit()
+        send_log(logger, "INFO", "Notification settings updated")
+        
+        return {
+            "status": "success",
+            "message": "Notification settings updated successfully",
+            "data": {
+                "id": settings.id,
+                "critical_alert_emails_enabled": bool(settings.critical_alert_emails_enabled),
+                "high_priority_notifications_enabled": bool(settings.high_priority_notifications_enabled),
+                "daily_summary_report_enabled": bool(settings.daily_summary_report_enabled),
+                "risk_score_threshold_for_critical": settings.risk_score_threshold_for_critical,
+                "risk_score_threshold_for_high": settings.risk_score_threshold_for_high,
+                "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
+            }
+        }
+    except ValueError as e:
+        send_log(logger, "ERROR", f"Invalid notification settings: {e}")
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        send_log(logger, "ERROR", f"Failed to update notification settings: {e}")
+        raise HTTPException(500, "Internal server error")
+    finally:
+        session.close()
+
+
+@app.get("/settings/detection")
+def get_detection_settings():
+    """Retrieve current detection settings."""
+    try:
+        session = SessionLocal()
+        settings = session.query(DetectionSettings).first()
+        session.close()
+        
+        if not settings:
+            return {
+                "status": "success",
+                "data": {
+                    "id": None,
+                    "risk_score_threshold": 70.0,
+                    "duplicate_detection_window_hours": 24,
+                    "ai_enhanced_detection_enabled": True,
+                }
+            }
+        
+        return {
+            "status": "success",
+            "data": {
+                "id": settings.id,
+                "risk_score_threshold": settings.risk_score_threshold,
+                "duplicate_detection_window_hours": settings.duplicate_detection_window_hours,
+                "ai_enhanced_detection_enabled": bool(settings.ai_enhanced_detection_enabled),
+                "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
+            }
+        }
+    except Exception as e:
+        send_log(logger, "ERROR", f"Failed to get detection settings: {e}")
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/settings/detection")
+def update_detection_settings(req: DetectionSettingsRequest):
+    """Update detection settings."""
+    try:
+        session = SessionLocal()
+        settings = session.query(DetectionSettings).first()
+        
+        if not settings:
+            settings = DetectionSettings()
+            session.add(settings)
+        
+        # Update only provided fields
+        if req.risk_score_threshold is not None:
+            # Validate range 0-100
+            if not (0 <= req.risk_score_threshold <= 100):
+                raise ValueError("Risk score threshold must be between 0 and 100")
+            settings.risk_score_threshold = req.risk_score_threshold
+        
+        if req.duplicate_detection_window_hours is not None:
+            if req.duplicate_detection_window_hours < 1 or req.duplicate_detection_window_hours > 8760:
+                raise ValueError("Duplicate detection window must be between 1 and 8760 hours (365 days)")
+            settings.duplicate_detection_window_hours = req.duplicate_detection_window_hours
+        
+        if req.ai_enhanced_detection_enabled is not None:
+            settings.ai_enhanced_detection_enabled = int(req.ai_enhanced_detection_enabled)
+        
+        session.commit()
+        send_log(logger, "INFO", "Detection settings updated")
+        
+        return {
+            "status": "success",
+            "message": "Detection settings updated successfully",
+            "data": {
+                "id": settings.id,
+                "risk_score_threshold": settings.risk_score_threshold,
+                "duplicate_detection_window_hours": settings.duplicate_detection_window_hours,
+                "ai_enhanced_detection_enabled": bool(settings.ai_enhanced_detection_enabled),
+                "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
+            }
+        }
+    except ValueError as e:
+        send_log(logger, "ERROR", f"Invalid detection settings: {e}")
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        send_log(logger, "ERROR", f"Failed to update detection settings: {e}")
+        raise HTTPException(500, "Internal server error")
+    finally:
+        session.close()
+
+
+@app.get("/settings/data-integration")
+def get_data_integration_status():
+    """Check database and data stream connection status."""
+    try:
+        session = SessionLocal()
+        integration_settings = session.query(DataIntegrationSettings).first()
+        
+        # Check database connection
+        db_status = "DISCONNECTED"
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            db_status = "CONNECTED"
+        except Exception as e:
+            send_log(logger, "WARN", f"Database connection check failed")
+            db_status = "DISCONNECTED"
+        
+        # Update or create integration settings
+        if not integration_settings:
+            integration_settings = DataIntegrationSettings()
+            session.add(integration_settings)
+        
+        integration_settings.database_connection_status = db_status
+        integration_settings.database_last_check = datetime.now(timezone.utc)
+        session.commit()
+        
+        # Data stream status is checked by seeing if data is flowing (from ingestion module)
+        data_stream_status = integration_settings.data_stream_status or "UNKNOWN"
+        
+        response_data = {
+            "status": "success",
+            "data": {
+                "database_connection": {
+                    "name": "PostgreSQL primary database",
+                    "status": db_status,
+                    "last_check": integration_settings.database_last_check.isoformat() if integration_settings.database_last_check else None,
+                },
+                "data_stream": {
+                    "name": "Real-time transaction feed",
+                    "status": data_stream_status,
+                    "last_check": integration_settings.data_stream_last_check.isoformat() if integration_settings.data_stream_last_check else None,
+                },
+                "external_api": {
+                    "name": "Third-party verification",
+                    "status": integration_settings.external_api_status or "UNKNOWN",
+                    "last_check": integration_settings.external_api_last_check.isoformat() if integration_settings.external_api_last_check else None,
+                }
+            }
+        }
+        
+        session.close()
+        return response_data
+    
+    except Exception as e:
+        send_log(logger, "ERROR", f"Failed to get data integration status")
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/settings/data-integration")
+def update_data_integration_settings(req: DataIntegrationSettingsRequest):
+    """Update data integration settings."""
+    try:
+        session = SessionLocal()
+        settings = session.query(DataIntegrationSettings).first()
+        
+        if not settings:
+            settings = DataIntegrationSettings()
+            session.add(settings)
+        
+        # Update external API URL if provided
+        if req.external_api_url is not None:
+            # Validate URL format
+            if not req.external_api_url.startswith(("http://", "https://")):
+                raise ValueError("Invalid API URL format")
+            settings.external_api_url = req.external_api_url
+            send_log(logger, "INFO", "Updated external API configuration")
+        
+        session.commit()
+        
+        return {
+            "status": "success",
+            "message": "Data integration settings updated",
+            "data": {
+                "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
+            }
+        }
+    
+    except ValueError as e:
+        send_log(logger, "ERROR", f"Invalid data integration settings: {e}")
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        send_log(logger, "ERROR", f"Failed to update data integration settings")
+        raise HTTPException(500, "Internal server error")
+    finally:
+        session.close()
+    
+
+@app.get("/transaction/{transaction_id}")
+def get_transaction_details(transaction_id: str):
+    """Get complete details of a specific transaction for popup display."""
+    try:
+        session = SessionLocal()
+        stmt = select(
+            Transaction.Transaction_ID, Transaction.User_ID, Transaction.Transaction_Amount,
+            Transaction.Transaction_Type, Transaction.Timestamp, Transaction.Location,
+            Transaction.Merchant_Category, Transaction.Card_Type, Transaction.Card_Age,
+            Transaction.Account_Balance, Transaction.Daily_Transaction_Count,
+            Transaction.Transaction_Distance, Transaction.Authentication_Method,
+            Transaction.Device_Type, Transaction.ingested_at,
+            Verdict.status, Verdict.ensemble_score, Verdict.rule_fraud_score,
+            Verdict.ai_flagged, Verdict.rule_flagged, Verdict.model_scores,
+            Verdict.reason_trail, Verdict.created_at,
+            LLMReview.llm_analysis, LLMReview.reviewed_at
+        ).join(Verdict, Transaction.Transaction_ID == Verdict.Transaction_ID)\
+         .outerjoin(LLMReview, Transaction.Transaction_ID == LLMReview.Transaction_ID)\
+         .where(Transaction.Transaction_ID == transaction_id)
+        
+        result = session.execute(stmt).first()
+        session.close()
+        
+        if not result:
+            raise HTTPException(404, "Transaction not found")
+        
+        return {
+            "status": "success",
+            "data": serialize(result._asdict() if hasattr(result, '_asdict') else result)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        send_log(logger, "ERROR", f"Failed to get transaction details: {e}")
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/transactions/filter")
+def filter_transactions(req: TransactionFilterRequest):
+    """Advanced filtering of transactions with multiple conditions."""
+    try:
+        session = SessionLocal()
+        stmt = select(
+            Transaction.Transaction_ID, Transaction.User_ID, Transaction.Transaction_Amount,
+            Transaction.Transaction_Type, Transaction.Location, Transaction.Timestamp,
+            Transaction.Card_Type, Verdict.status, Verdict.ensemble_score
+        ).join(Verdict, Transaction.Transaction_ID == Verdict.Transaction_ID)
+        
+        # Apply filters
+        if req.status:
+            stmt = stmt.where(Verdict.status == req.status)
+        
+        if req.min_amount is not None:
+            stmt = stmt.where(Transaction.Transaction_Amount >= req.min_amount)
+        
+        if req.max_amount is not None:
+            stmt = stmt.where(Transaction.Transaction_Amount <= req.max_amount)
+        
+        if req.location:
+            stmt = stmt.where(Transaction.Location.ilike(f"%{req.location}%"))
+        
+        if req.transaction_type:
+            stmt = stmt.where(Transaction.Transaction_Type == req.transaction_type)
+        
+        if req.date_from:
+            from datetime import datetime as dt
+            date_from = dt.fromisoformat(req.date_from)
+            stmt = stmt.where(Transaction.Timestamp >= date_from)
+        
+        if req.date_to:
+            from datetime import datetime as dt
+            date_to = dt.fromisoformat(req.date_to)
+            stmt = stmt.where(Transaction.Timestamp <= date_to)
+        
+        # Pagination
+        offset = (req.page - 1) * req.per_page
+        results = session.execute(stmt.order_by(desc(Transaction.Timestamp)).offset(offset).limit(req.per_page)).all()
+        total_count = session.query(func.count()).select_from(Transaction).count()
+        
+        session.close()
+        
+        return {
+            "status": "success",
+            "count": len(results),
+            "total": total_count,
+            "page": req.page,
+            "per_page": req.per_page,
+            "data": serialize(results)
+        }
+    except Exception as e:
+        send_log(logger, "ERROR", f"Filter transactions failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/review/approve")
+def approve_review(req: ReviewApprovalRequest):
+    """Approve or disapprove a review from the frontend and update verdict status."""
+    try:
+        session = SessionLocal()
+        
+        # Get the review
+        llm_review = session.query(LLMReview).filter(
+            LLMReview.Transaction_ID == req.transaction_id
+        ).first()
+        
+        if not llm_review:
+            raise HTTPException(404, "Review not found for this transaction")
+        
+        # Get the verdict to update
+        verdict = session.query(Verdict).filter(
+            Verdict.Transaction_ID == req.transaction_id
+        ).first()
+        
+        if not verdict:
+            raise HTTPException(404, "Verdict not found for this transaction")
+        
+        # Update review status
+        llm_review.is_approved = 1 if req.approved else -1
+        llm_review.reviewer_notes = req.reviewer_notes or ""
+        llm_review.reviewed_at = datetime.now(timezone.utc)
+        
+        # Update verdict status based on verdict_action
+        if req.verdict_action == "SAFE":
+            verdict.status = "SAFE"
+        elif req.verdict_action == "FRAUD":
+            verdict.status = "FRAUD"
+        
+        # Update reason trail with reviewer decision
+        decision_text = f"[Human Review: {'APPROVED' if req.approved else 'DISAPPROVED'} - {req.verdict_action}]"
+        if req.reviewer_notes:
+            decision_text += f" {req.reviewer_notes}"
+        verdict.reason_trail = f"{verdict.reason_trail or ''}\n{decision_text}"
+        
+        session.commit()
+        send_log(logger, "INFO", f"Review {'approved' if req.approved else 'disapproved'} for {req.transaction_id}, verdict set to {req.verdict_action}")
+        
+        session.close()
+        
+        return {
+            "status": "success",
+            "message": f"Review {'approved' if req.approved else 'disapproved'}, verdict updated to {req.verdict_action}",
+            "transaction_id": req.transaction_id,
+            "verdict_status": req.verdict_action
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        session.close()
+        send_log(logger, "ERROR", f"Review approval failed: {e}")
+        raise HTTPException(500, "Internal server error")
+
+
+@app.post("/transaction/send-to-llm")
+def send_to_llm(req: SendToLLMRequest):
+    """Send a transaction (even if safe) to LLM for review."""
+    try:
+        session = SessionLocal()
+        
+        # Check if transaction exists
+        transaction = session.query(Transaction).filter(
+            Transaction.Transaction_ID == req.transaction_id
+        ).first()
+        
+        if not transaction:
+            raise HTTPException(404, "Transaction not found")
+        
+        # Check if review already exists
+        existing_review = session.query(LLMReview).filter(
+            LLMReview.Transaction_ID == req.transaction_id
+        ).first()
+        
+        if existing_review:
+            # Update existing review to force re-analysis
+            existing_review.llm_analysis = f"[Re-queued for review]\n{req.reason or 'Manual review requested'}"
+            existing_review.reviewed_at = datetime.now(timezone.utc)
+        else:
+            # Create new review record
+            new_review = LLMReview(
+                Transaction_ID=req.transaction_id,
+                llm_analysis=f"[Queued for LLM review]\n{req.reason or 'Manual review requested'}",
+                reviewed_at=datetime.now(timezone.utc)
+            )
+            session.add(new_review)
+        
+        session.commit()
+        send_log(logger, "INFO", f"Transaction {req.transaction_id} sent to LLM for review")
+        
+        session.close()
+        
+        return {
+            "status": "success",
+            "message": "Transaction queued for LLM review",
+            "transaction_id": req.transaction_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        session.close()
+        send_log(logger, "ERROR", f"Failed to queue transaction for LLM: {e}")
+        raise HTTPException(500, "Internal server error")
+
+
+@app.get("/transactions/by-status/{status}")
+def get_transactions_by_status(status: str, page: int = 1, per_page: int = 20):
+    """Get all transactions with a specific verdict status (SAFE, WARN, FRAUD)."""
+    try:
+        if status not in ["SAFE", "WARN", "FRAUD"]:
+            raise HTTPException(400, "Invalid status. Must be SAFE, WARN, or FRAUD")
+        
+        session = SessionLocal()
+        stmt = select(
+            Transaction.Transaction_ID, Transaction.User_ID, Transaction.Transaction_Amount,
+            Transaction.Transaction_Type, Transaction.Location, Transaction.Timestamp,
+            Verdict.status, Verdict.ensemble_score
+        ).join(Verdict, Transaction.Transaction_ID == Verdict.Transaction_ID)\
+         .where(Verdict.status == status)
+        
+        offset = (page - 1) * per_page
+        results = session.execute(stmt.order_by(desc(Transaction.Timestamp)).offset(offset).limit(per_page)).all()
+        
+        session.close()
+        
+        return {
+            "status": "success",
+            "count": len(results),
+            "page": page,
+            "per_page": per_page,
+            "data": serialize(results)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        send_log(logger, "ERROR", f"Failed to get transactions by status: {e}")
+        raise HTTPException(500, "Internal server error")
+
+    
+if __name__ == "__main__":
+    uvicorn.run("main:app", host=LOCALHOST, port=QUERY_PORT, reload=False)

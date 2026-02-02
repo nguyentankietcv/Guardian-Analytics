@@ -24,6 +24,7 @@ export interface RecentVerdict {
 
 export interface Alert {
   Transaction_ID: string;
+  User_ID: string;
   ensemble_score: number;
   rule_fraud_score: number;
   model_scores: Record<string, number> | null;
@@ -33,6 +34,14 @@ export interface Alert {
   Location: string;
   Transaction_Type: string;
   Timestamp: string;
+  Card_Type: string;
+  Device_Type: string;
+  Merchant_Category: string;
+  Risk_Score: number;
+  Daily_Transaction_Count: number;
+  Transaction_Distance: number;
+  Authentication_Method: string;
+  llm_analysis?: string | null;
 }
 
 export interface Review {
@@ -61,6 +70,22 @@ export interface TransactionRecord {
   Timestamp: string;
   ensemble_score: number;
   status: string;
+  Device_Type?: string;
+  Merchant_Category?: string;
+  Risk_Score?: number;
+  Daily_Transaction_Count?: number;
+  Transaction_Distance?: number;
+  Authentication_Method?: string;
+  rule_fraud_score?: number;
+  model_scores?: Record<string, number> | null;
+  reason_trail?: string;
+  llm_analysis?: string | null;
+}
+
+export interface TrendDataPoint {
+  hour: string;
+  transactions: number;
+  fraud: number;
 }
 
 export interface TrendData {
@@ -77,11 +102,23 @@ export interface SystemHealth {
   modules: Record<string, "ONLINE" | "OFFLINE">;
 }
 
+export interface PaginatedResponse<T> {
+  data: T[];
+  count: number;
+  total: number;
+  page: number;
+  per_page: number;
+  sort_by?: string;
+  sort_order?: string;
+}
+
 export interface ApiResponse<T> {
   status: string;
   data: T;
   count?: number;
+  total?: number;
   page?: number;
+  per_page?: number;
 }
 
 async function fetchApi<T>(endpoint: string): Promise<T> {
@@ -101,8 +138,13 @@ export async function fetchRecentVerdicts(limit: number = 5): Promise<RecentVerd
   return fetchApi<RecentVerdict[]>(`/dashboard/recent?limit=${limit}`);
 }
 
-export async function fetchTrends(): Promise<TrendData> {
-  return fetchApi<TrendData>("/dashboard/trends");
+export async function fetchTrends(): Promise<TrendDataPoint[]> {
+  const response = await fetch(`${API_BASE_URL}/dashboard/trends`);
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  }
+  const json = await response.json();
+  return json.data || [];
 }
 
 export async function fetchSystemHealth(): Promise<SystemHealth> {
@@ -114,49 +156,181 @@ export async function fetchSystemHealth(): Promise<SystemHealth> {
   return { system_state: json.system_state, modules: json.modules };
 }
 
-export async function fetchAlerts(minScore: number = 0.7, status?: string): Promise<Alert[]> {
-  const params = new URLSearchParams({ min_score: minScore.toString() });
-  if (status) params.append("status", status);
-  return fetchApi<Alert[]>(`/alerts?${params}`);
+export interface AlertsQueryParams {
+  minScore?: number;
+  status?: string;
+  page?: number;
+  perPage?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
-export async function fetchReviews(): Promise<Review[]> {
-  return fetchApi<Review[]>("/reviews");
-}
-
-export async function fetchTransactions(
-  page: number = 1,
-  perPage: number = 20,
-  search?: string,
-  status?: string
-): Promise<{ data: TransactionRecord[]; count: number; page: number }> {
-  const params = new URLSearchParams({
+export async function fetchAlerts(params: AlertsQueryParams = {}): Promise<PaginatedResponse<Alert>> {
+  const { minScore = 0, status, page = 1, perPage = 20, sortBy = "ensemble_score", sortOrder = "desc" } = params;
+  const urlParams = new URLSearchParams({
+    min_score: minScore.toString(),
     page: page.toString(),
     per_page: perPage.toString(),
+    sort_by: sortBy,
+    sort_order: sortOrder,
   });
-  if (search) params.append("search", search);
-  if (status) params.append("status", status);
+  if (status) urlParams.append("status", status);
   
-  const response = await fetch(`${API_BASE_URL}/transactions?${params}`);
+  const response = await fetch(`${API_BASE_URL}/alerts?${urlParams}`);
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
   const json = await response.json();
-  return { data: json.data, count: json.count, page: json.page };
+  return {
+    data: json.data || [],
+    count: json.count || 0,
+    total: json.total || 0,
+    page: json.page || 1,
+    per_page: json.per_page || perPage,
+    sort_by: json.sort_by,
+    sort_order: json.sort_order,
+  };
+}
+
+export interface ReviewsQueryParams {
+  page?: number;
+  perPage?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+}
+
+export async function fetchReviews(params: ReviewsQueryParams = {}): Promise<PaginatedResponse<Review>> {
+  const { page = 1, perPage = 20, sortBy = "reviewed_at", sortOrder = "desc" } = params;
+  const urlParams = new URLSearchParams({
+    page: page.toString(),
+    per_page: perPage.toString(),
+    sort_by: sortBy,
+    sort_order: sortOrder,
+  });
+  
+  const response = await fetch(`${API_BASE_URL}/reviews?${urlParams}`);
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  }
+  const json = await response.json();
+  return {
+    data: json.data || [],
+    count: json.count || 0,
+    total: json.total || 0,
+    page: json.page || 1,
+    per_page: json.per_page || perPage,
+    sort_by: json.sort_by,
+    sort_order: json.sort_order,
+  };
+}
+
+export interface TransactionsQueryParams {
+  page?: number;
+  perPage?: number;
+  search?: string;
+  status?: string;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+}
+
+export async function fetchTransactions(params: TransactionsQueryParams = {}): Promise<PaginatedResponse<TransactionRecord>> {
+  const { page = 1, perPage = 20, search, status, sortBy = "Timestamp", sortOrder = "desc" } = params;
+  const urlParams = new URLSearchParams({
+    page: page.toString(),
+    per_page: perPage.toString(),
+    sort_by: sortBy,
+    sort_order: sortOrder,
+  });
+  if (search) urlParams.append("search", search);
+  if (status) urlParams.append("status", status);
+  
+  const response = await fetch(`${API_BASE_URL}/transactions?${urlParams}`);
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  }
+  const json = await response.json();
+  return {
+    data: json.data || [],
+    count: json.count || 0,
+    total: json.total || json.count || 0,
+    page: json.page || 1,
+    per_page: perPage,
+    sort_by: json.sort_by,
+    sort_order: json.sort_order,
+  };
+}
+
+export async function fetchTransactionDetails(transactionId: string): Promise<TransactionRecord | null> {
+  const response = await fetch(`${API_BASE_URL}/transactions?search=${encodeURIComponent(transactionId)}&per_page=1`);
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  }
+  const json = await response.json();
+  const data = json.data || [];
+  return data.length > 0 ? data[0] : null;
 }
 
 export async function updateVerdict(
   transactionId: string,
-  action: "APPROVE" | "BLOCK",
+  action: "SAFE" | "FRAUD" | "APPROVE" | "BLOCK",
   reason?: string
 ): Promise<void> {
+  const mappedAction = action === "APPROVE" ? "SAFE" : action === "BLOCK" ? "FRAUD" : action;
   const response = await fetch(`${API_BASE_URL}/verdict/update`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       transaction_id: transactionId,
-      action,
+      action: mappedAction,
       reason,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  }
+}
+
+export async function approveReview(
+  transactionId: string,
+  approved: boolean,
+  reviewerNotes?: string
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/reviews/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      transaction_id: transactionId,
+      approved,
+      verdict_action: approved ? "SAFE" : "FRAUD",
+      reviewer_notes: reviewerNotes || null,
+    }),
+  });
+  if (!response.ok) {
+    const fallbackResponse = await fetch(`${API_BASE_URL}/verdict/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        transaction_id: transactionId,
+        action: approved ? "SAFE" : "FRAUD",
+        reason: reviewerNotes || (approved ? "Approved by reviewer" : "Rejected by reviewer"),
+      }),
+    });
+    if (!fallbackResponse.ok) {
+      throw new Error(`API error: ${fallbackResponse.status} ${fallbackResponse.statusText}`);
+    }
+  }
+}
+
+export async function sendToLLM(
+  transactionId: string,
+  reason?: string
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/llm/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      transaction_id: transactionId,
+      reason: reason || null,
     }),
   });
   if (!response.ok) {
