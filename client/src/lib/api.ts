@@ -163,3 +163,75 @@ export async function updateVerdict(
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
 }
+
+export interface NotificationSettings {
+  id: number | null;
+  critical_alert_emails_enabled: boolean;
+  high_priority_notifications_enabled: boolean;
+  alert_email_address: string | null;
+  daily_summary_report_enabled: boolean;
+  slack_webhook_url: string | null;
+  sms_phone_number: string | null;
+  risk_score_threshold_for_critical: number;
+  risk_score_threshold_for_high: number;
+}
+
+export interface DetectionSettings {
+  id: number | null;
+  risk_score_threshold: number;
+  duplicate_detection_window_hours: number;
+  ai_enhanced_detection_enabled: boolean;
+}
+
+export interface DataIntegrationStatus {
+  database_connection: {
+    name: string;
+    status: string;
+    last_check: string | null;
+  };
+  data_stream: {
+    name: string;
+    status: string;
+    last_check: string | null;
+  };
+  external_api: {
+    name: string;
+    status: string;
+    url: string | null;
+    last_check: string | null;
+  };
+}
+
+export async function fetchNotificationSettings(): Promise<NotificationSettings> {
+  return fetchApi<NotificationSettings>("/settings/notifications");
+}
+
+export async function updateNotificationSettings(settings: Partial<NotificationSettings>): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/settings/notifications`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  }
+}
+
+export async function fetchDetectionSettings(): Promise<DetectionSettings> {
+  return fetchApi<DetectionSettings>("/settings/detection");
+}
+
+export async function updateDetectionSettings(settings: Partial<DetectionSettings>): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/settings/detection`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  }
+}
+
+export async function fetchDataIntegrationStatus(): Promise<DataIntegrationStatus> {
+  return fetchApi<DataIntegrationStatus>("/settings/data-integration");
+}
