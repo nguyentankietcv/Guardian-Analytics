@@ -41,13 +41,13 @@ export default function Dashboard() {
     refetchInterval: refreshInterval || false,
   });
 
-  const { data: trends, isLoading: trendsLoading } = useQuery<TrendData>({
+  const { data: trends, isLoading: trendsLoading, isError: trendsError, refetch: refetchTrends } = useQuery<TrendData>({
     queryKey: ["/dashboard/trends"],
     queryFn: fetchTrends,
     refetchInterval: refreshInterval || false,
   });
 
-  const { data: systemHealth, isLoading: healthLoading } = useQuery<SystemHealth>({
+  const { data: systemHealth, isLoading: healthLoading, isError: healthError, refetch: refetchHealth } = useQuery<SystemHealth>({
     queryKey: ["/system/health"],
     queryFn: fetchSystemHealth,
     refetchInterval: refreshInterval || false,
@@ -121,13 +121,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {(statsError || verdictsError) && (
+      {(statsError || verdictsError || trendsError || healthError) && (
         <Alert variant="destructive" className="mb-4">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Connection Error</AlertTitle>
           <AlertDescription className="flex items-center justify-between gap-4">
             <span>Unable to fetch data from the API. Make sure the backend is running at localhost:9000.</span>
-            <Button variant="outline" size="sm" onClick={() => { refetchStats(); refetchVerdicts(); }}>
+            <Button variant="outline" size="sm" onClick={() => { refetchStats(); refetchVerdicts(); refetchTrends(); refetchHealth(); }}>
               <RefreshCcw className="h-4 w-4 mr-1" />
               Retry
             </Button>
