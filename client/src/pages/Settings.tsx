@@ -170,34 +170,94 @@ export default function Settings() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card data-testid="card-detection-settings">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="w-5 h-5 text-primary" />
-              Detection Settings
-            </CardTitle>
-            <CardDescription>Configure fraud detection options</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {detectLoading ? (
-              <div className="space-y-4">
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : (
+        <div className="space-y-6">
+          <Card data-testid="card-detection-settings">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-primary" />
+                Detection Settings
+              </CardTitle>
+              <CardDescription>Configure fraud detection options</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {detectLoading ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>AI-Enhanced Detection</Label>
+                    <p className="text-xs text-muted-foreground">Use ML models for fraud detection</p>
+                  </div>
+                  <Switch 
+                    checked={localDetect.ai_enhanced_detection_enabled ?? true}
+                    onCheckedChange={(checked) => setLocalDetect({ ...localDetect, ai_enhanced_detection_enabled: checked })}
+                    data-testid="switch-ai-detection" 
+                  />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card data-testid="card-integration-settings">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Database className="w-5 h-5 text-primary" />
+                Data Integration
+              </CardTitle>
+              <CardDescription>Database connection status</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {integrationLoading ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ) : integrationStatus ? (
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Database Connection</Label>
+                    <p className="text-xs text-muted-foreground">{integrationStatus.database_connection.name}</p>
+                  </div>
+                  <span className={`text-sm font-medium ${getStatusColor(integrationStatus.database_connection.status)}`}>
+                    {getStatusText(integrationStatus.database_connection.status)}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-muted-foreground text-sm">Unable to load integration status</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card data-testid="card-model-settings">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Cpu className="w-5 h-5 text-primary" />
+                AI/ML Model Info
+              </CardTitle>
+              <CardDescription>Model information</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label>AI-Enhanced Detection</Label>
-                  <p className="text-xs text-muted-foreground">Use ML models for fraud detection</p>
+                  <Label>Current Model Version</Label>
+                  <p className="text-xs text-muted-foreground">Fraud detection model</p>
                 </div>
-                <Switch 
-                  checked={localDetect.ai_enhanced_detection_enabled ?? true}
-                  onCheckedChange={(checked) => setLocalDetect({ ...localDetect, ai_enhanced_detection_enabled: checked })}
-                  data-testid="switch-ai-detection" 
-                />
+                <span className="text-sm font-medium">v2.4.1</span>
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <div className="space-y-2">
+                <Label>Active Detection Models</Label>
+                <div className="flex flex-wrap gap-2">
+                  <span className="text-xs bg-muted px-2 py-1 rounded">XGBoost</span>
+                  <span className="text-xs bg-muted px-2 py-1 rounded">Isolation Forest</span>
+                  <span className="text-xs bg-muted px-2 py-1 rounded">GraphSAGE</span>
+                  <span className="text-xs bg-muted px-2 py-1 rounded">DNN</span>
+                  <span className="text-xs bg-muted px-2 py-1 rounded">Transformer</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         <Card data-testid="card-notification-settings">
           <CardHeader>
@@ -324,65 +384,6 @@ export default function Settings() {
                 </div>
               </>
             )}
-          </CardContent>
-        </Card>
-
-        <Card data-testid="card-integration-settings">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Database className="w-5 h-5 text-primary" />
-              Data Integration
-            </CardTitle>
-            <CardDescription>Database connection status</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {integrationLoading ? (
-              <div className="space-y-4">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : integrationStatus ? (
-              <>
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Database Connection</Label>
-                    <p className="text-xs text-muted-foreground">{integrationStatus.database_connection.name}</p>
-                  </div>
-                  <span className={`text-sm font-medium ${getStatusColor(integrationStatus.database_connection.status)}`}>
-                    {getStatusText(integrationStatus.database_connection.status)}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <p className="text-muted-foreground text-sm">Unable to load integration status</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card data-testid="card-model-settings">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Cpu className="w-5 h-5 text-primary" />
-              AI/ML Model Info
-            </CardTitle>
-            <CardDescription>Model information</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Current Model Version</Label>
-                <p className="text-xs text-muted-foreground">Fraud detection model</p>
-              </div>
-              <span className="text-sm font-medium">v2.4.1</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Ensemble Models</Label>
-                <p className="text-xs text-muted-foreground">Active detection models</p>
-              </div>
-              <span className="text-sm font-medium text-muted-foreground">XGBoost, RF, Neural Net</span>
-            </div>
           </CardContent>
         </Card>
       </div>
