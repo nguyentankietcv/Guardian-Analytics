@@ -4,6 +4,7 @@
 T-GUARDIAN is a fraud detection and risk monitoring dashboard application by TMA Innovation. The dashboard provides real-time transaction monitoring, fraud detection (rule-based and AI-based), duplicate payment detection, and LLM-assisted human review capabilities.
 
 ## Recent Changes
+- February 2026: Updated data schema to match actual database structure (Transaction, Verdict, LLMReview tables)
 - January 2026: Converted landing page to full dashboard application
 - Implemented sidebar navigation with Dashboard, Transactions, Alerts, Reviews, Settings pages
 - Built detection pipeline visualization matching architecture diagram
@@ -71,6 +72,6 @@ client/src/
 - Mock data for demonstration (no backend integration required)
 
 ### Key Data Types
-- Transaction: id, transactionId, amount, sender, receiver, status, riskScore, alertType
-- Alert: id, transactionId, type (duplicate/fraud/anomaly), severity, message, status
-- ReviewItem: id, transactionId, alertId, priority, llmSuggestion, confidence, status
+- Transaction: Transaction_ID, User_ID, Transaction_Amount, Transaction_Type, Timestamp, Location, Card_Type, Device_Type, Merchant_Category, Risk_Score (0-1 decimal), Fraud_Label (0/1), Daily_Transaction_Count, Transaction_Distance, Authentication_Method
+- Verdict: id, Transaction_ID, ensemble_score, model_scores (xgboost, random_forest, neural_net), rule_fraud_score, flag, rule_flagged, ai_flagged, status, reason_trail, created_at
+- LLMReview: Transaction_ID, User_ID, ensemble_score, llm_analysis, reviewed_at, status
