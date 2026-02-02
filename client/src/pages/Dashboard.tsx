@@ -22,11 +22,22 @@ import {
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
-import { fetchDashboardStats, fetchRecentVerdicts, fetchTrends, fetchSystemHealth, type DashboardStats, type RecentVerdict, type TrendData, type SystemHealth } from "@/lib/api";
+import { 
+  fetchDashboardStats, 
+  fetchRecentVerdicts, 
+  fetchTrends, 
+  fetchSystemHealth, 
+  type DashboardStats, 
+  type RecentVerdict, 
+  type TrendDataPoint, 
+  type SystemHealth 
+} from "@/lib/api";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
+const DEFAULT_REFRESH_INTERVAL = 30000;
+
 export default function Dashboard() {
-  const [refreshInterval, setRefreshInterval] = useState(0);
+  const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
   const queryClient = useQueryClient();
 
   const { data: stats, isLoading: statsLoading, isFetching: statsFetching, isError: statsError, refetch: refetchStats } = useQuery<DashboardStats | null>({
@@ -41,7 +52,7 @@ export default function Dashboard() {
     refetchInterval: refreshInterval || false,
   });
 
-  const { data: trends, isLoading: trendsLoading, isError: trendsError, refetch: refetchTrends } = useQuery<TrendData>({
+  const { data: trends, isLoading: trendsLoading, isError: trendsError, refetch: refetchTrends } = useQuery<TrendDataPoint[]>({
     queryKey: ["/dashboard/trends"],
     queryFn: fetchTrends,
     refetchInterval: refreshInterval || false,
@@ -60,10 +71,10 @@ export default function Dashboard() {
     queryClient.invalidateQueries({ queryKey: ["/system/health"] });
   };
 
-  const chartData = trends?.labels?.map((label, index) => ({
-    time: label,
-    transactions: trends.datasets?.[0]?.data?.[index] || 0,
-    fraud: trends.datasets?.[1]?.data?.[index] || 0,
+  const chartData = trends?.map((item) => ({
+    time: item.hour,
+    transactions: item.transactions,
+    fraud: item.fraud,
   })) || [];
 
   const getModuleStatus = (moduleName: string): "ONLINE" | "OFFLINE" | undefined => {
@@ -516,14 +527,14 @@ export default function Dashboard() {
                       </div>
                       <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
                         <Clock className="w-3 h-3" />
-                        <span data-testid={`text-verdict-time-${index}`}>{verdict.created_at ? new Date(verdict.created_at).toLocaleString() : 'N/A'}</span>
+                        {verdict.created_at ? new Date(verdict.created_at).toLocaleString() : 'N/A'}
                       </div>
                     </div>
                   </div>
                 ))
               ) : (
                 <div className="text-center text-muted-foreground py-8">
-                  No recent verdicts available
+                  No recent verdicts
                 </div>
               )}
             </div>

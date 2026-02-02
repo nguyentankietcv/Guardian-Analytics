@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { 
   Brain, 
   CheckCircle, 
@@ -12,34 +14,54 @@ import {
   User,
   Sparkles,
   AlertTriangle,
-  ArrowRight,
   MapPin,
   CreditCard,
-  RefreshCcw
+  RefreshCcw,
+  Eye
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
-import { fetchReviews, updateVerdict, type Review } from "@/lib/api";
+import Pagination from "@/components/Pagination";
+import TransactionDetailsModal from "@/components/TransactionDetailsModal";
+import { fetchReviews, approveReview, type Review, type PaginatedResponse } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
+const DEFAULT_REFRESH_INTERVAL = 30000;
+
 export default function Reviews() {
-  const [refreshInterval, setRefreshInterval] = useState(0);
+  const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
+  const [reviewerNotes, setReviewerNotes] = useState<Record<string, string>>({});
+  const [selectedReview, setSelectedReview] = useState<Review | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data: reviews, isLoading, isFetching, isError, refetch } = useQuery<Review[]>({
-    queryKey: ["/reviews"],
-    queryFn: fetchReviews,
+  const { data, isLoading, isFetching, isError, refetch } = useQuery<PaginatedResponse<Review>>({
+    queryKey: ["/reviews", page, perPage],
+    queryFn: () => fetchReviews({ page, perPage, sortBy: "ensemble_score", sortOrder: "desc" }),
     refetchInterval: refreshInterval || false,
   });
 
-  const updateMutation = useMutation({
-    mutationFn: ({ transactionId, action }: { transactionId: string; action: "APPROVE" | "BLOCK" }) =>
-      updateVerdict(transactionId, action),
-    onSuccess: () => {
+  const approveMutation = useMutation({
+    mutationFn: ({ transactionId, approved }: { transactionId: string; approved: boolean }) => {
+      const notes = reviewerNotes[transactionId];
+      return approveReview(transactionId, approved, notes);
+    },
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/reviews"] });
       queryClient.invalidateQueries({ queryKey: ["/alerts"] });
-      toast({ title: "Verdict updated successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/dashboard/stats"] });
+      toast({ 
+        title: variables.approved ? "Transaction approved (marked SAFE)" : "Transaction blocked (marked FRAUD)" 
+      });
+      setReviewerNotes((prev) => {
+        const updated = { ...prev };
+        delete updated[variables.transactionId];
+        return updated;
+      });
     },
     onError: () => {
       toast({ title: "Failed to update verdict", variant: "destructive" });
@@ -48,6 +70,10 @@ export default function Reviews() {
 
   const handleManualRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/reviews"] });
+  };
+
+  const handleNotesChange = (transactionId: string, value: string) => {
+    setReviewerNotes((prev) => ({ ...prev, [transactionId]: value }));
   };
 
   const getStatusBadge = (status: string) => {
@@ -77,8 +103,11 @@ export default function Reviews() {
     return <Badge className="bg-blue-500 text-white">Low</Badge>;
   };
 
-  const reviewsList = reviews || [];
-  const pendingReviews = reviewsList.filter((r) => r.status === "WARN");
+  const reviewsList = data?.data || [];
+  const totalItems = data?.total || 0;
+  const totalPages = Math.ceil(totalItems / perPage) || 1;
+  
+  const pendingReviews = reviewsList.filter((r) => r.status === "WARN").length;
   const avgScore = reviewsList.length > 0 
     ? reviewsList.reduce((sum, r) => sum + (r.ensemble_score || 0), 0) / reviewsList.length 
     : 0;
@@ -129,7 +158,7 @@ export default function Reviews() {
               <Skeleton className="h-8 w-12" />
             ) : (
               <>
-                <div className="text-2xl font-bold text-orange-500">{pendingReviews.length}</div>
+                <div className="text-2xl font-bold text-orange-500">{pendingReviews}</div>
                 <p className="text-xs text-muted-foreground">Awaiting human decision</p>
               </>
             )}
@@ -146,7 +175,7 @@ export default function Reviews() {
               <Skeleton className="h-8 w-12" />
             ) : (
               <>
-                <div className="text-2xl font-bold text-primary">{reviewsList.length}</div>
+                <div className="text-2xl font-bold text-primary">{totalItems}</div>
                 <p className="text-xs text-muted-foreground">LLM-analyzed transactions</p>
               </>
             )}
@@ -179,6 +208,7 @@ export default function Reviews() {
           </CardTitle>
           <CardDescription>
             AI-analyzed transactions with detailed LLM explanations. Review analysis and make final decisions.
+            Approve marks as SAFE, Block marks as FRAUD.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -214,6 +244,14 @@ export default function Reviews() {
                       {getStatusBadge(review.status)}
                     </div>
                     <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => { setSelectedReview(review); setDetailsOpen(true); }}
+                        data-testid={`button-view-${index}`}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
                       <span className="text-xs text-muted-foreground">Ensemble Score:</span>
                       <span className={getEnsembleColor(review.ensemble_score || 0)} data-testid={`text-score-${index}`}>
                         {((review.ensemble_score || 0) * 100).toFixed(0)}%
@@ -278,6 +316,22 @@ export default function Reviews() {
                     </p>
                   </div>
 
+                  {review.status === "WARN" && (
+                    <div className="mb-4">
+                      <Label htmlFor={`notes-${review.Transaction_ID}`} className="text-sm font-medium">
+                        Reviewer Notes (Optional)
+                      </Label>
+                      <Textarea
+                        id={`notes-${review.Transaction_ID}`}
+                        placeholder="Add your notes about this transaction..."
+                        value={reviewerNotes[review.Transaction_ID] || ""}
+                        onChange={(e) => handleNotesChange(review.Transaction_ID, e.target.value)}
+                        className="mt-1 min-h-[60px]"
+                        data-testid={`textarea-notes-${index}`}
+                      />
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between flex-wrap gap-4">
                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
@@ -289,24 +343,21 @@ export default function Reviews() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => updateMutation.mutate({ transactionId: review.Transaction_ID, action: "BLOCK" })}
-                        disabled={updateMutation.isPending || review.status !== "WARN"}
+                        onClick={() => approveMutation.mutate({ transactionId: review.Transaction_ID, approved: false })}
+                        disabled={approveMutation.isPending || review.status !== "WARN"}
                         data-testid={`button-block-${index}`}
                       >
                         <XCircle className="w-4 h-4 mr-1 text-destructive" />
-                        Block
+                        Block (FRAUD)
                       </Button>
                       <Button
                         size="sm"
-                        onClick={() => updateMutation.mutate({ transactionId: review.Transaction_ID, action: "APPROVE" })}
-                        disabled={updateMutation.isPending || review.status !== "WARN"}
+                        onClick={() => approveMutation.mutate({ transactionId: review.Transaction_ID, approved: true })}
+                        disabled={approveMutation.isPending || review.status !== "WARN"}
                         data-testid={`button-approve-${index}`}
                       >
                         <CheckCircle className="w-4 h-4 mr-1" />
-                        Approve
-                      </Button>
-                      <Button variant="ghost" size="sm" data-testid={`button-investigate-${index}`}>
-                        <ArrowRight className="w-4 h-4" />
+                        Approve (SAFE)
                       </Button>
                     </div>
                   </div>
@@ -314,8 +365,24 @@ export default function Reviews() {
               ))
             )}
           </div>
+
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            perPage={perPage}
+            onPageChange={setPage}
+            onPerPageChange={(newPerPage) => { setPerPage(newPerPage); setPage(1); }}
+            isLoading={isLoading}
+          />
         </CardContent>
       </Card>
+
+      <TransactionDetailsModal
+        transaction={selectedReview as any}
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+      />
     </div>
   );
 }

@@ -13,21 +13,51 @@ import {
   XCircle,
   Eye,
   AlertTriangle,
-  RefreshCcw
+  RefreshCcw,
+  Brain
 } from "lucide-react";
 import { Alert as AlertComponent, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
-import { fetchAlerts, updateVerdict, type Alert as AlertData } from "@/lib/api";
+import Pagination from "@/components/Pagination";
+import FilterDropdown from "@/components/FilterDropdown";
+import TransactionDetailsModal from "@/components/TransactionDetailsModal";
+import SendToLLMDialog from "@/components/SendToLLMDialog";
+import { fetchAlerts, updateVerdict, sendToLLM, type Alert as AlertData, type PaginatedResponse } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
+const STATUS_OPTIONS = [
+  { label: "All", value: "" },
+  { label: "Flagged", value: "WARN" },
+  { label: "Fraud", value: "FRAUD" },
+];
+
+const DEFAULT_REFRESH_INTERVAL = 30000;
+
 export default function Alerts() {
-  const [refreshInterval, setRefreshInterval] = useState(0);
+  const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
+  const [sortBy, setSortBy] = useState("ensemble_score");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [selectedAlert, setSelectedAlert] = useState<AlertData | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [llmDialogOpen, setLlmDialogOpen] = useState(false);
+  const [llmTransactionId, setLlmTransactionId] = useState<string | null>(null);
+  
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data: alerts, isLoading, isFetching, isError, refetch } = useQuery<AlertData[]>({
-    queryKey: ["/alerts"],
-    queryFn: () => fetchAlerts(0.7),
+  const { data, isLoading, isFetching, isError, refetch } = useQuery<PaginatedResponse<AlertData>>({
+    queryKey: ["/alerts", page, perPage, statusFilter, sortBy, sortOrder],
+    queryFn: () => fetchAlerts({
+      minScore: 0.5,
+      status: statusFilter || undefined,
+      page,
+      perPage,
+      sortBy,
+      sortOrder,
+    }),
     refetchInterval: refreshInterval || false,
   });
 
@@ -36,6 +66,8 @@ export default function Alerts() {
       updateVerdict(transactionId, action),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["/reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["/dashboard/stats"] });
       toast({ title: "Verdict updated successfully" });
     },
     onError: () => {
@@ -43,8 +75,32 @@ export default function Alerts() {
     },
   });
 
+  const llmMutation = useMutation({
+    mutationFn: ({ transactionId, reason }: { transactionId: string; reason?: string }) =>
+      sendToLLM(transactionId, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["/reviews"] });
+      toast({ title: "Sent to LLM for analysis" });
+      setLlmDialogOpen(false);
+    },
+    onError: () => {
+      toast({ title: "Failed to send to LLM", variant: "destructive" });
+    },
+  });
+
   const handleManualRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/alerts"] });
+  };
+
+  const handleViewDetails = (alert: AlertData) => {
+    setSelectedAlert(alert);
+    setDetailsOpen(true);
+  };
+
+  const handleSendToLLM = (transactionId: string) => {
+    setLlmTransactionId(transactionId);
+    setLlmDialogOpen(true);
   };
 
   const getStatusBadge = (status: string) => {
@@ -73,10 +129,13 @@ export default function Alerts() {
     return <Badge className="bg-blue-500 text-white">Low ({(score * 100).toFixed(0)}%)</Badge>;
   };
 
-  const alertsList = alerts || [];
-  const criticalAlerts = alertsList.filter((a) => a.ensemble_score >= 0.9);
-  const highAlerts = alertsList.filter((a) => a.ensemble_score >= 0.7 && a.ensemble_score < 0.9);
-  const reviewingAlerts = alertsList.filter((a) => a.status === "WARN");
+  const alertsList = data?.data || [];
+  const totalItems = data?.total || 0;
+  const totalPages = Math.ceil(totalItems / perPage) || 1;
+  
+  const criticalAlerts = alertsList.filter((a) => a.ensemble_score >= 0.9).length;
+  const highAlerts = alertsList.filter((a) => a.ensemble_score >= 0.7 && a.ensemble_score < 0.9).length;
+  const reviewingAlerts = alertsList.filter((a) => a.status === "WARN").length;
 
   return (
     <div className="p-6 space-y-6">
@@ -94,7 +153,7 @@ export default function Alerts() {
           />
           <Badge variant="outline" className="gap-1 border-destructive text-destructive">
             <AlertTriangle className="w-3 h-3" />
-            {alertsList.length} Active
+            {totalItems} Active
           </Badge>
         </div>
       </div>
@@ -124,7 +183,7 @@ export default function Alerts() {
               <Skeleton className="h-8 w-12" />
             ) : (
               <>
-                <div className="text-2xl font-bold text-destructive">{criticalAlerts.length}</div>
+                <div className="text-2xl font-bold text-destructive">{criticalAlerts}</div>
                 <p className="text-xs text-muted-foreground">Immediate action required</p>
               </>
             )}
@@ -141,7 +200,7 @@ export default function Alerts() {
               <Skeleton className="h-8 w-12" />
             ) : (
               <>
-                <div className="text-2xl font-bold text-orange-500">{highAlerts.length}</div>
+                <div className="text-2xl font-bold text-orange-500">{highAlerts}</div>
                 <p className="text-xs text-muted-foreground">Review within 1 hour</p>
               </>
             )}
@@ -158,7 +217,7 @@ export default function Alerts() {
               <Skeleton className="h-8 w-12" />
             ) : (
               <>
-                <div className="text-2xl font-bold text-primary">{reviewingAlerts.length}</div>
+                <div className="text-2xl font-bold text-primary">{reviewingAlerts}</div>
                 <p className="text-xs text-muted-foreground">Currently being analyzed</p>
               </>
             )}
@@ -168,8 +227,18 @@ export default function Alerts() {
 
       <Card data-testid="card-alerts-list">
         <CardHeader>
-          <CardTitle>Flagged Transactions</CardTitle>
-          <CardDescription>All transactions flagged by rule-based or AI-based detection</CardDescription>
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <CardTitle>Flagged Transactions</CardTitle>
+              <CardDescription>All transactions flagged by rule-based or AI-based detection (sorted by risk)</CardDescription>
+            </div>
+            <FilterDropdown
+              label="Status"
+              value={statusFilter}
+              options={STATUS_OPTIONS}
+              onChange={(value) => { setStatusFilter(value); setPage(1); }}
+            />
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -206,14 +275,18 @@ export default function Alerts() {
                         <span className="font-semibold font-mono">{alert.Transaction_ID}</span>
                         {getEnsembleScoreBadge(alert.ensemble_score || 0)}
                         {getStatusBadge(alert.status)}
-                        <Badge variant="outline" className="gap-1">
-                          <Gavel className="w-3 h-3" />
-                          Rule
-                        </Badge>
-                        <Badge variant="outline" className="gap-1">
-                          <Cpu className="w-3 h-3" />
-                          AI
-                        </Badge>
+                        {alert.rule_fraud_score && alert.rule_fraud_score > 0.5 && (
+                          <Badge variant="outline" className="gap-1">
+                            <Gavel className="w-3 h-3" />
+                            Rule
+                          </Badge>
+                        )}
+                        {alert.ensemble_score && alert.ensemble_score > 0.5 && (
+                          <Badge variant="outline" className="gap-1">
+                            <Cpu className="w-3 h-3" />
+                            AI
+                          </Badge>
+                        )}
                       </div>
                       
                       <div className="flex items-center gap-4 text-sm mb-2 text-muted-foreground flex-wrap">
@@ -239,8 +312,24 @@ export default function Alerts() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        onClick={() => handleViewDetails(alert)}
+                        data-testid={`button-view-${index}`}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleSendToLLM(alert.Transaction_ID)}
+                        data-testid={`button-llm-${index}`}
+                      >
+                        <Brain className="h-4 w-4 text-primary" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => updateMutation.mutate({ transactionId: alert.Transaction_ID, action: "APPROVE" })}
-                        disabled={updateMutation.isPending}
+                        disabled={updateMutation.isPending || alert.status === "SAFE"}
                         data-testid={`button-approve-${index}`}
                       >
                         <CheckCircle className="h-4 w-4 text-[#00A307]" />
@@ -249,7 +338,7 @@ export default function Alerts() {
                         variant="ghost"
                         size="icon"
                         onClick={() => updateMutation.mutate({ transactionId: alert.Transaction_ID, action: "BLOCK" })}
-                        disabled={updateMutation.isPending}
+                        disabled={updateMutation.isPending || alert.status === "FRAUD"}
                         data-testid={`button-reject-${index}`}
                       >
                         <XCircle className="h-4 w-4 text-destructive" />
@@ -260,8 +349,32 @@ export default function Alerts() {
               ))
             )}
           </div>
+
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            perPage={perPage}
+            onPageChange={setPage}
+            onPerPageChange={(newPerPage) => { setPerPage(newPerPage); setPage(1); }}
+            isLoading={isLoading}
+          />
         </CardContent>
       </Card>
+
+      <TransactionDetailsModal
+        transaction={selectedAlert}
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+      />
+
+      <SendToLLMDialog
+        transactionId={llmTransactionId}
+        open={llmDialogOpen}
+        onClose={() => setLlmDialogOpen(false)}
+        onSend={(id, reason) => llmMutation.mutate({ transactionId: id, reason })}
+        isPending={llmMutation.isPending}
+      />
     </div>
   );
 }

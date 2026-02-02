@@ -56,8 +56,7 @@ export default function Pagination({
       <div className="flex items-center gap-1">
         <Button
           variant="outline"
-          size="icon"
-          className="h-8 w-8"
+          size="sm"
           onClick={() => onPageChange(1)}
           disabled={page === 1 || isLoading}
           data-testid="button-first-page"
@@ -66,8 +65,7 @@ export default function Pagination({
         </Button>
         <Button
           variant="outline"
-          size="icon"
-          className="h-8 w-8"
+          size="sm"
           onClick={() => onPageChange(page - 1)}
           disabled={page === 1 || isLoading}
           data-testid="button-prev-page"
@@ -83,8 +81,7 @@ export default function Pagination({
         
         <Button
           variant="outline"
-          size="icon"
-          className="h-8 w-8"
+          size="sm"
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages || isLoading}
           data-testid="button-next-page"
@@ -93,8 +90,7 @@ export default function Pagination({
         </Button>
         <Button
           variant="outline"
-          size="icon"
-          className="h-8 w-8"
+          size="sm"
           onClick={() => onPageChange(totalPages)}
           disabled={page >= totalPages || isLoading}
           data-testid="button-last-page"
