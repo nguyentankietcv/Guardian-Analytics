@@ -4,7 +4,6 @@ import {
   CreditCard, 
   AlertTriangle, 
   ShieldAlert, 
-  Copy, 
   Activity,
   TrendingUp,
   Clock,
@@ -12,27 +11,20 @@ import {
   Database,
   Cpu,
   BarChart3,
-  UserCheck
+  UserCheck,
+  Bot,
+  Gavel
 } from "lucide-react";
-import { dashboardStats, mockAlerts } from "@/lib/mockData";
+import { dashboardStats, mockVerdicts } from "@/lib/mockData";
 
 export default function Dashboard() {
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case "critical": return "bg-destructive text-destructive-foreground";
-      case "high": return "bg-orange-500 text-white";
-      case "medium": return "bg-yellow-500 text-white";
-      case "low": return "bg-blue-500 text-white";
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "rejected": return "bg-destructive text-destructive-foreground";
+      case "reviewing": return "bg-orange-500 text-white";
+      case "pending": return "bg-yellow-500 text-white";
+      case "approved": return "bg-[#00A307] text-white";
       default: return "bg-muted text-muted-foreground";
-    }
-  };
-
-  const getAlertTypeIcon = (type: string) => {
-    switch (type) {
-      case "fraud": return <ShieldAlert className="w-4 h-4" />;
-      case "duplicate": return <Copy className="w-4 h-4" />;
-      case "anomaly": return <Activity className="w-4 h-4" />;
-      default: return <AlertTriangle className="w-4 h-4" />;
     }
   };
 
@@ -58,7 +50,7 @@ export default function Dashboard() {
           <CardContent>
             <div className="text-2xl font-bold" data-testid="stat-total-transactions">{dashboardStats.totalTransactions.toLocaleString()}</div>
             <p className="text-xs text-muted-foreground">
-              <TrendingUp className="inline h-3 w-3 text-green-500 mr-1" />
+              <TrendingUp className="inline h-3 w-3 text-[#00A307] mr-1" />
               +12% from last hour
             </p>
           </CardContent>
@@ -77,23 +69,23 @@ export default function Dashboard() {
 
         <Card data-testid="card-active-alerts">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Alerts</CardTitle>
+            <CardTitle className="text-sm font-medium">Active Verdicts</CardTitle>
             <ShieldAlert className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-destructive" data-testid="stat-active-alerts">{dashboardStats.activeAlerts}</div>
-            <p className="text-xs text-muted-foreground">5 critical, 7 high</p>
+            <p className="text-xs text-muted-foreground">Pending decision</p>
           </CardContent>
         </Card>
 
         <Card data-testid="card-pending-reviews">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Reviews</CardTitle>
+            <CardTitle className="text-sm font-medium">LLM Reviews</CardTitle>
             <UserCheck className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-primary" data-testid="stat-pending-reviews">{dashboardStats.pendingReviews}</div>
-            <p className="text-xs text-muted-foreground">LLM-assisted queue</p>
+            <p className="text-xs text-muted-foreground">AI-assisted queue</p>
           </CardContent>
         </Card>
       </div>
@@ -101,39 +93,39 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card data-testid="card-fraud-detected">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Fraud Detected</CardTitle>
+            <CardTitle className="text-sm font-medium">Confirmed Fraud</CardTitle>
             <ShieldAlert className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{dashboardStats.fraudDetected}</div>
             <div className="w-full bg-muted rounded-full h-2 mt-2">
-              <div className="bg-destructive h-2 rounded-full" style={{ width: "21%" }} />
+              <div className="bg-destructive h-2 rounded-full" style={{ width: `${(dashboardStats.fraudDetected / dashboardStats.flaggedTransactions) * 100}%` }} />
             </div>
           </CardContent>
         </Card>
 
-        <Card data-testid="card-duplicates">
+        <Card data-testid="card-rule-flagged">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Duplicates Found</CardTitle>
-            <Copy className="h-4 w-4 text-orange-500" />
+            <CardTitle className="text-sm font-medium">Rule-Flagged</CardTitle>
+            <Gavel className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{dashboardStats.duplicatesFound}</div>
+            <div className="text-2xl font-bold">{dashboardStats.ruleFlagged}</div>
             <div className="w-full bg-muted rounded-full h-2 mt-2">
-              <div className="bg-orange-500 h-2 rounded-full" style={{ width: "30%" }} />
+              <div className="bg-orange-500 h-2 rounded-full" style={{ width: `${(dashboardStats.ruleFlagged / dashboardStats.flaggedTransactions) * 100}%` }} />
             </div>
           </CardContent>
         </Card>
 
-        <Card data-testid="card-anomalies">
+        <Card data-testid="card-ai-flagged">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Anomalies Detected</CardTitle>
-            <Activity className="h-4 w-4 text-yellow-500" />
+            <CardTitle className="text-sm font-medium">AI-Flagged</CardTitle>
+            <Bot className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{dashboardStats.anomaliesDetected}</div>
+            <div className="text-2xl font-bold">{dashboardStats.aiFlagged}</div>
             <div className="w-full bg-muted rounded-full h-2 mt-2">
-              <div className="bg-yellow-500 h-2 rounded-full" style={{ width: "48%" }} />
+              <div className="bg-primary h-2 rounded-full" style={{ width: `${(dashboardStats.aiFlagged / dashboardStats.flaggedTransactions) * 100}%` }} />
             </div>
           </CardContent>
         </Card>
@@ -156,7 +148,7 @@ export default function Dashboard() {
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-medium" data-testid="text-pipeline-normalization">Data Normalization</span>
-                      <Badge variant="outline" className="text-green-600" data-testid="badge-status-normalization">Active</Badge>
+                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-normalization">Active</Badge>
                     </div>
                     <p className="text-sm text-muted-foreground">Processing incoming streams</p>
                   </div>
@@ -164,53 +156,53 @@ export default function Dashboard() {
 
                 <div className="flex items-center gap-4" data-testid="pipeline-step-deduplication">
                   <div className="w-12 h-12 rounded-lg bg-pink-100 dark:bg-pink-900 flex items-center justify-center z-10">
-                    <Copy className="w-6 h-6 text-pink-600" />
+                    <Activity className="w-6 h-6 text-pink-600" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-medium" data-testid="text-pipeline-deduplication">Deduplication Check</span>
-                      <Badge variant="outline" className="text-green-600" data-testid="badge-status-deduplication">Active</Badge>
+                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-deduplication">Active</Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground">7 duplicates flagged today</p>
+                    <p className="text-sm text-muted-foreground">Identifying duplicate transactions</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-4" data-testid="pipeline-step-rule-fraud">
-                  <div className="w-12 h-12 rounded-lg bg-green-100 dark:bg-green-900 flex items-center justify-center z-10">
-                    <Cpu className="w-6 h-6 text-green-600" />
+                  <div className="w-12 h-12 rounded-lg bg-orange-100 dark:bg-orange-900 flex items-center justify-center z-10">
+                    <Gavel className="w-6 h-6 text-orange-600" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-medium" data-testid="text-pipeline-rule-fraud">Rule-based Fraud Check</span>
-                      <Badge variant="outline" className="text-green-600" data-testid="badge-status-rule-fraud">Active</Badge>
+                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-rule-fraud">Active</Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground">156 rules evaluated</p>
+                    <p className="text-sm text-muted-foreground">{dashboardStats.ruleFlagged} rule violations detected</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-4" data-testid="pipeline-step-ai-fraud">
-                  <div className="w-12 h-12 rounded-lg bg-green-100 dark:bg-green-900 flex items-center justify-center z-10">
-                    <Activity className="w-6 h-6 text-green-600" />
+                  <div className="w-12 h-12 rounded-lg bg-purple-100 dark:bg-purple-900 flex items-center justify-center z-10">
+                    <Cpu className="w-6 h-6 text-purple-600" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-medium" data-testid="text-pipeline-ai-fraud">AI-based Fraud Check</span>
-                      <Badge variant="outline" className="text-green-600" data-testid="badge-status-ai-fraud">Active</Badge>
+                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-ai-fraud">Active</Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground">ML model v2.4.1</p>
+                    <p className="text-sm text-muted-foreground">XGBoost + Random Forest + Neural Net ensemble</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-4" data-testid="pipeline-step-flagging">
-                  <div className="w-12 h-12 rounded-lg bg-orange-100 dark:bg-orange-900 flex items-center justify-center z-10">
-                    <AlertTriangle className="w-6 h-6 text-orange-600" />
+                  <div className="w-12 h-12 rounded-lg bg-red-100 dark:bg-red-900 flex items-center justify-center z-10">
+                    <AlertTriangle className="w-6 h-6 text-destructive" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-medium" data-testid="text-pipeline-flagging">Flagging Service</span>
-                      <Badge variant="outline" className="text-green-600" data-testid="badge-status-flagging">Active</Badge>
+                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-flagging">Active</Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground">23 flagged this session</p>
+                    <p className="text-sm text-muted-foreground">{dashboardStats.flaggedTransactions} flagged this session</p>
                   </div>
                 </div>
 
@@ -220,10 +212,10 @@ export default function Dashboard() {
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="font-medium" data-testid="text-pipeline-dashboard">User Dashboard</span>
-                      <Badge variant="outline" className="text-green-600" data-testid="badge-status-dashboard">Active</Badge>
+                      <span className="font-medium" data-testid="text-pipeline-dashboard">LLM-Assist Human Review</span>
+                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-dashboard">Active</Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground">Visual analytics & monitoring</p>
+                    <p className="text-sm text-muted-foreground">{dashboardStats.pendingReviews} pending reviews</p>
                   </div>
                 </div>
               </div>
@@ -231,29 +223,39 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card data-testid="card-recent-alerts">
+        <Card data-testid="card-recent-verdicts">
           <CardHeader>
-            <CardTitle>Recent Alerts</CardTitle>
-            <CardDescription>Latest flagged transactions</CardDescription>
+            <CardTitle>Recent Verdicts</CardTitle>
+            <CardDescription>Latest flagged transactions with scores</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {mockAlerts.slice(0, 5).map((alert) => (
-                <div key={alert.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50" data-testid={`card-recent-alert-${alert.id}`}>
+              {mockVerdicts.slice(0, 5).map((verdict) => (
+                <div key={verdict.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50" data-testid={`card-recent-verdict-${verdict.id}`}>
                   <div className="mt-0.5">
-                    {getAlertTypeIcon(alert.type)}
+                    {verdict.ai_flagged && verdict.rule_flagged ? (
+                      <ShieldAlert className="w-4 h-4 text-destructive" />
+                    ) : verdict.ai_flagged ? (
+                      <Cpu className="w-4 h-4 text-purple-500" />
+                    ) : (
+                      <Gavel className="w-4 h-4 text-orange-500" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-sm" data-testid={`text-alert-txn-${alert.id}`}>{alert.transactionId}</span>
-                      <Badge className={getSeverityColor(alert.severity)} data-testid={`badge-severity-${alert.id}`}>
-                        {alert.severity}
+                      <span className="font-medium text-sm font-mono" data-testid={`text-verdict-txn-${verdict.id}`}>{verdict.Transaction_ID}</span>
+                      <Badge className={getStatusColor(verdict.status)} data-testid={`badge-status-${verdict.id}`}>
+                        {verdict.status}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2" data-testid={`text-alert-message-${alert.id}`}>{alert.message}</p>
+                    <div className="flex items-center gap-4 mt-1 text-xs">
+                      <span className="text-muted-foreground">Ensemble: <span className="font-semibold text-foreground">{(verdict.ensemble_score * 100).toFixed(0)}%</span></span>
+                      <span className="text-muted-foreground">Rule: <span className="font-semibold text-foreground">{(verdict.rule_fraud_score * 100).toFixed(0)}%</span></span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2" data-testid={`text-verdict-reason-${verdict.id}`}>{verdict.reason_trail}</p>
                     <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
                       <Clock className="w-3 h-3" />
-                      <span data-testid={`text-alert-time-${alert.id}`}>{new Date(alert.timestamp).toLocaleTimeString()}</span>
+                      <span data-testid={`text-verdict-time-${verdict.id}`}>{new Date(verdict.created_at).toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
@@ -267,22 +269,22 @@ export default function Dashboard() {
         <Card data-testid="card-approval-rate">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Approval Rate</CardTitle>
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
+            <CheckCircle2 className="h-4 w-4 text-[#00A307]" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-500">{dashboardStats.approvalRate}%</div>
+            <div className="text-2xl font-bold text-[#00A307]">{dashboardStats.approvalRate}%</div>
             <p className="text-xs text-muted-foreground">Last 24 hours</p>
           </CardContent>
         </Card>
 
-        <Card data-testid="card-processing-time">
+        <Card data-testid="card-avg-ensemble">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Processing Time</CardTitle>
-            <Clock className="h-4 w-4 text-primary" />
+            <CardTitle className="text-sm font-medium">Avg Ensemble Score</CardTitle>
+            <Cpu className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{dashboardStats.avgProcessingTime}s</div>
-            <p className="text-xs text-muted-foreground">Per transaction</p>
+            <div className="text-2xl font-bold">{(dashboardStats.avgEnsembleScore * 100).toFixed(0)}%</div>
+            <p className="text-xs text-muted-foreground">AI model confidence</p>
           </CardContent>
         </Card>
 
@@ -292,8 +294,8 @@ export default function Dashboard() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{dashboardStats.riskScoreAvg}</div>
-            <p className="text-xs text-muted-foreground">Out of 100</p>
+            <div className="text-2xl font-bold">{(dashboardStats.avgRiskScore * 100).toFixed(0)}%</div>
+            <p className="text-xs text-muted-foreground">Transaction risk level</p>
           </CardContent>
         </Card>
       </div>

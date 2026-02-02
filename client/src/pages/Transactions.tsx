@@ -10,8 +10,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, Filter, Eye, MoreHorizontal } from "lucide-react";
-import { mockTransactions, type Transaction } from "@/lib/mockData";
+import { Search, Filter, Eye, MoreHorizontal, MapPin, CreditCard, Smartphone } from "lucide-react";
+import { mockTransactions, mockVerdicts, type Transaction } from "@/lib/mockData";
 import { useState } from "react";
 
 export default function Transactions() {
@@ -19,46 +19,41 @@ export default function Transactions() {
 
   const filteredTransactions = mockTransactions.filter(
     (t) =>
-      t.transactionId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.sender.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.receiver.toLowerCase().includes(searchTerm.toLowerCase())
+      t.Transaction_ID.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.User_ID.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.Location.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.Merchant_Category.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const getStatusBadge = (status: Transaction["status"]) => {
-    switch (status) {
-      case "approved":
-        return <Badge className="bg-green-500 text-white">Approved</Badge>;
-      case "flagged":
-        return <Badge className="bg-orange-500 text-white">Flagged</Badge>;
-      case "rejected":
-        return <Badge className="bg-destructive text-destructive-foreground">Rejected</Badge>;
-      case "pending":
-        return <Badge variant="outline">Pending</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
-    }
+  const getVerdict = (transactionId: string) => {
+    return mockVerdicts.find(v => v.Transaction_ID === transactionId);
   };
 
-  const getAlertTypeBadge = (alertType: Transaction["alertType"]) => {
-    switch (alertType) {
-      case "duplicate":
-        return <Badge variant="outline" className="border-orange-500 text-orange-600">Duplicate</Badge>;
-      case "fraud":
-        return <Badge variant="outline" className="border-destructive text-destructive">Fraud</Badge>;
-      case "anomaly":
-        return <Badge variant="outline" className="border-yellow-500 text-yellow-600">Anomaly</Badge>;
-      case "none":
-        return <Badge variant="outline" className="text-muted-foreground">None</Badge>;
-      default:
-        return null;
+  const getFraudBadge = (fraudLabel: number, transactionId: string) => {
+    const verdict = getVerdict(transactionId);
+    if (verdict && verdict.flag === 1) {
+      return <Badge className="bg-destructive text-destructive-foreground">Flagged</Badge>;
     }
+    if (fraudLabel === 1) {
+      return <Badge className="bg-orange-500 text-white">Fraud</Badge>;
+    }
+    return <Badge variant="outline" className="text-[#00A307] border-[#00A307]">Clean</Badge>;
   };
 
   const getRiskScoreColor = (score: number) => {
-    if (score >= 80) return "text-destructive font-bold";
-    if (score >= 50) return "text-orange-500 font-semibold";
-    if (score >= 30) return "text-yellow-600";
-    return "text-green-500";
+    if (score >= 0.8) return "text-destructive font-bold";
+    if (score >= 0.5) return "text-orange-500 font-semibold";
+    if (score >= 0.3) return "text-yellow-600";
+    return "text-[#00A307]";
+  };
+
+  const getDeviceIcon = (device: string) => {
+    switch (device.toLowerCase()) {
+      case "mobile":
+        return <Smartphone className="w-4 h-4" />;
+      default:
+        return <CreditCard className="w-4 h-4" />;
+    }
   };
 
   return (
@@ -96,56 +91,65 @@ export default function Transactions() {
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-[#F6F6F6]">
                   <TableHead>Transaction ID</TableHead>
+                  <TableHead>User ID</TableHead>
                   <TableHead>Amount</TableHead>
-                  <TableHead>Sender</TableHead>
-                  <TableHead>Receiver</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>Card</TableHead>
                   <TableHead>Risk Score</TableHead>
-                  <TableHead>Alert Type</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>Timestamp</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredTransactions.map((transaction) => (
-                  <TableRow key={transaction.id} data-testid={`row-transaction-${transaction.id}`}>
-                    <TableCell className="font-medium" data-testid={`text-txn-id-${transaction.id}`}>
-                      {transaction.transactionId}
+                  <TableRow key={transaction.Transaction_ID} data-testid={`row-transaction-${transaction.Transaction_ID}`}>
+                    <TableCell className="font-medium font-mono text-sm" data-testid={`text-txn-id-${transaction.Transaction_ID}`}>
+                      {transaction.Transaction_ID}
                     </TableCell>
-                    <TableCell data-testid={`text-amount-${transaction.id}`}>
-                      {new Intl.NumberFormat("en-US", {
-                        style: "currency",
-                        currency: transaction.currency,
-                      }).format(transaction.amount)}
+                    <TableCell className="font-mono text-sm text-muted-foreground">
+                      {transaction.User_ID}
                     </TableCell>
-                    <TableCell className="max-w-[150px] truncate" title={transaction.sender}>
-                      {transaction.sender}
-                    </TableCell>
-                    <TableCell className="max-w-[150px] truncate" title={transaction.receiver}>
-                      {transaction.receiver}
-                    </TableCell>
-                    <TableCell data-testid={`badge-status-${transaction.id}`}>
-                      {getStatusBadge(transaction.status)}
-                    </TableCell>
-                    <TableCell>
-                      <span className={getRiskScoreColor(transaction.riskScore)} data-testid={`text-risk-${transaction.id}`}>
-                        {transaction.riskScore}
+                    <TableCell data-testid={`text-amount-${transaction.Transaction_ID}`}>
+                      <span className="font-semibold">
+                        ${transaction.Transaction_Amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </span>
                     </TableCell>
-                    <TableCell data-testid={`badge-alert-${transaction.id}`}>
-                      {getAlertTypeBadge(transaction.alertType)}
+                    <TableCell>
+                      <Badge variant="outline" className="gap-1">
+                        {getDeviceIcon(transaction.Device_Type)}
+                        {transaction.Transaction_Type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <span className="flex items-center gap-1 text-sm">
+                        <MapPin className="w-3 h-3 text-muted-foreground" />
+                        {transaction.Location}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm">{transaction.Card_Type}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className={getRiskScoreColor(transaction.Risk_Score)} data-testid={`text-risk-${transaction.Transaction_ID}`}>
+                        {(transaction.Risk_Score * 100).toFixed(1)}%
+                      </span>
+                    </TableCell>
+                    <TableCell data-testid={`badge-status-${transaction.Transaction_ID}`}>
+                      {getFraudBadge(transaction.Fraud_Label, transaction.Transaction_ID)}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
-                      {new Date(transaction.timestamp).toLocaleString()}
+                      {new Date(transaction.Timestamp).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" data-testid={`button-view-${transaction.id}`}>
+                        <Button variant="ghost" size="icon" data-testid={`button-view-${transaction.Transaction_ID}`}>
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" data-testid={`button-more-${transaction.id}`}>
+                        <Button variant="ghost" size="icon" data-testid={`button-more-${transaction.Transaction_ID}`}>
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </div>
