@@ -1,0 +1,200 @@
+import os
+import sys
+import traceback
+from datetime import datetime, timezone
+from pathlib import Path
+
+from dotenv import load_dotenv
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    create_engine,
+    text,
+)
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy_utils import create_database, database_exists
+
+load_dotenv()
+
+DB_URL = os.getenv(
+    "DB_URL", "postgresql://postgres:postgres@localhost:5432/t-guardian"
+)
+CSV_FILE_PATH = "Fraud.csv"
+
+Base = declarative_base()
+
+
+class BackupTransaction(Base):
+    __tablename__ = "backup_transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    Transaction_ID = Column(
+        String(50), index=True
+    )  # Not unique - allows duplicates from CSV cycles
+    User_ID = Column(String(50))
+    Transaction_Amount = Column(Numeric(12, 2))
+    Transaction_Type = Column(String(50))
+    Timestamp = Column(DateTime)
+    ingested_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    Account_Balance = Column(Numeric(15, 2))
+    Device_Type = Column(String(50))
+    Location = Column(String(100))
+    Merchant_Category = Column(String(100))
+    IP_Address_Flag = Column(Integer)
+    Previous_Fraudulent_Activity = Column(Integer)
+    Daily_Transaction_Count = Column(Integer)
+    Avg_Transaction_Amount_7d = Column(Numeric(12, 2))
+    Failed_Transaction_Count_7d = Column(Integer)
+    Card_Type = Column(String(50))
+    Card_Age = Column(Integer)
+    Transaction_Distance = Column(Numeric(12, 2))
+    Authentication_Method = Column(String(50))
+    Is_Weekend = Column(Integer)
+    Fraud_Label = Column(Integer)
+
+
+class Transaction(Base):
+    __tablename__ = "transactions"
+
+    Transaction_ID = Column(String(50), primary_key=True)
+    User_ID = Column(String(50))
+    Transaction_Amount = Column(Numeric(12, 2))
+    Transaction_Type = Column(String(50))
+    Timestamp = Column(DateTime)
+    ingested_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    Account_Balance = Column(Numeric(15, 2))
+    Device_Type = Column(String(50))
+    Location = Column(String(100))
+    Merchant_Category = Column(String(100))
+    IP_Address_Flag = Column(Integer)
+    Previous_Fraudulent_Activity = Column(Integer)
+    Daily_Transaction_Count = Column(Integer)
+    Avg_Transaction_Amount_7d = Column(Numeric(12, 2))
+    Failed_Transaction_Count_7d = Column(Integer)
+    Card_Type = Column(String(50))
+    Card_Age = Column(Integer)
+    Transaction_Distance = Column(Numeric(12, 2))
+    Authentication_Method = Column(String(50))
+    Is_Weekend = Column(Integer)
+    Fraud_Label = Column(Integer)
+
+
+class Verdict(Base):
+    __tablename__ = "verdicts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    Transaction_ID = Column(String(50), ForeignKey("transactions.Transaction_ID"))
+
+    ensemble_score = Column(Float, default=0.0)
+    model_scores = Column(JSON)
+    rule_fraud_score = Column(Float, default=0.0)
+
+    flag = Column(Integer)
+    rule_flagged = Column(Integer, default=0)
+    ai_flagged = Column(Integer, default=0)
+
+    status = Column(String(20))
+    reason_trail = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LLMReview(Base):
+    __tablename__ = "llm_reviews"
+
+    Transaction_ID = Column(
+        String(50),
+        ForeignKey("transactions.Transaction_ID"),
+        primary_key=True,
+        unique=True,
+    )
+    User_ID = Column(String(50))
+    ensemble_score = Column(Float)
+    llm_analysis = Column(Text)
+    reviewed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+def get_logger_socket():
+    return None
+
+
+def send_log(sock, level, msg):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"{timestamp} | {level:8s} | [INIT_DB] {msg}")
+
+
+def init_db(reset=True):
+    logger = get_logger_socket()
+    send_log(logger, "INFO", "Database initialization started.")
+
+    try:
+        # --- FIX: Check/Create DB *BEFORE* creating engine connection ---
+        if not database_exists(DB_URL):
+            send_log(logger, "INFO", f"Database 't-guardian' not found. Creating...")
+            create_database(DB_URL)
+            send_log(logger, "INFO", "Database 't-guardian' created successfully.")
+        else:
+            send_log(logger, "INFO", "Database 't-guardian' already exists.")
+
+        # --- Now it is safe to connect ---
+        engine = create_engine(
+            DB_URL,
+            connect_args={
+                "connect_timeout": 10,
+                "options": "-c statement_timeout=30000",
+            },
+        )
+
+        send_log(logger, "INFO", "Testing database connection...")
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        send_log(logger, "INFO", "Database connection successful.")
+
+        if reset:
+            send_log(logger, "WARN", "Dropping old tables...")
+            # Drop tables with CASCADE to handle foreign key dependencies
+            with engine.begin() as conn:
+                conn.execute(text("DROP TABLE IF EXISTS llm_reviews CASCADE"))
+                conn.execute(text("DROP TABLE IF EXISTS verdicts CASCADE"))
+                conn.execute(text("DROP TABLE IF EXISTS transactions CASCADE"))
+                conn.execute(text("DROP TABLE IF EXISTS backup_transactions CASCADE"))
+            send_log(logger, "INFO", "Old tables dropped.")
+
+        send_log(logger, "INFO", "Creating schema...")
+        Base.metadata.create_all(engine)
+        send_log(logger, "INFO", "Schema initialized.")
+
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        try:
+            send_log(
+                logger, "INFO", "Schema ready. Ingestion service will stream data."
+            )
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        send_log(logger, "CRITICAL", f"DB Init Failed: {e}\n{tb}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    init_db(reset=True)
