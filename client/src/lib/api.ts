@@ -72,6 +72,11 @@ export interface TrendData {
   }>;
 }
 
+export interface SystemHealth {
+  system_state: "HEALTHY" | "DEGRADED";
+  modules: Record<string, "ONLINE" | "OFFLINE">;
+}
+
 export interface ApiResponse<T> {
   status: string;
   data: T;
@@ -98,6 +103,15 @@ export async function fetchRecentVerdicts(limit: number = 5): Promise<RecentVerd
 
 export async function fetchTrends(): Promise<TrendData> {
   return fetchApi<TrendData>("/dashboard/trends");
+}
+
+export async function fetchSystemHealth(): Promise<SystemHealth> {
+  const response = await fetch(`${API_BASE_URL}/system/health`);
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  }
+  const json = await response.json();
+  return { system_state: json.system_state, modules: json.modules };
 }
 
 export async function fetchAlerts(minScore: number = 0.7, status?: string): Promise<Alert[]> {

@@ -15,14 +15,15 @@ import {
   Cpu,
   BarChart3,
   UserCheck,
-  Bot,
   Gavel,
   Activity,
-  RefreshCcw
+  RefreshCcw,
+  Search
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
-import { fetchDashboardStats, fetchRecentVerdicts, type DashboardStats, type RecentVerdict } from "@/lib/api";
+import { fetchDashboardStats, fetchRecentVerdicts, fetchTrends, fetchSystemHealth, type DashboardStats, type RecentVerdict, type TrendData, type SystemHealth } from "@/lib/api";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 export default function Dashboard() {
   const [refreshInterval, setRefreshInterval] = useState(0);
@@ -40,9 +41,44 @@ export default function Dashboard() {
     refetchInterval: refreshInterval || false,
   });
 
+  const { data: trends, isLoading: trendsLoading } = useQuery<TrendData>({
+    queryKey: ["/dashboard/trends"],
+    queryFn: fetchTrends,
+    refetchInterval: refreshInterval || false,
+  });
+
+  const { data: systemHealth, isLoading: healthLoading } = useQuery<SystemHealth>({
+    queryKey: ["/system/health"],
+    queryFn: fetchSystemHealth,
+    refetchInterval: refreshInterval || false,
+  });
+
   const handleManualRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/dashboard/stats"] });
     queryClient.invalidateQueries({ queryKey: ["/dashboard/recent"] });
+    queryClient.invalidateQueries({ queryKey: ["/dashboard/trends"] });
+    queryClient.invalidateQueries({ queryKey: ["/system/health"] });
+  };
+
+  const chartData = trends?.labels?.map((label, index) => ({
+    time: label,
+    transactions: trends.datasets?.[0]?.data?.[index] || 0,
+    fraud: trends.datasets?.[1]?.data?.[index] || 0,
+  })) || [];
+
+  const getModuleStatus = (moduleName: string): "ONLINE" | "OFFLINE" | undefined => {
+    return systemHealth?.modules?.[moduleName];
+  };
+
+  const getStatusBadge = (moduleName: string) => {
+    if (healthLoading) return <Skeleton className="h-5 w-12" />;
+    const status = getModuleStatus(moduleName);
+    if (status === "ONLINE") {
+      return <Badge variant="outline" className="text-[#00A307] border-[#00A307]">Online</Badge>;
+    } else if (status === "OFFLINE") {
+      return <Badge variant="outline" className="text-destructive border-destructive">Offline</Badge>;
+    }
+    return <Badge variant="outline" className="text-muted-foreground">Unknown</Badge>;
   };
 
   const getStatusColor = (status: string) => {
@@ -239,91 +275,198 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      <Card data-testid="card-trends" className="mb-6">
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <CardTitle>Transaction & Fraud Trends (24h)</CardTitle>
+              <CardDescription>Hourly transaction volume and fraud incidents</CardDescription>
+            </div>
+            {systemHealth && (
+              <Badge 
+                variant="outline" 
+                className={systemHealth.system_state === "HEALTHY" ? "text-[#00A307] border-[#00A307]" : "text-orange-500 border-orange-500"}
+              >
+                System: {systemHealth.system_state}
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {trendsLoading ? (
+            <div className="h-[300px] flex items-center justify-center">
+              <Skeleton className="h-full w-full" />
+            </div>
+          ) : chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis 
+                  dataKey="time" 
+                  tick={{ fontSize: 12 }}
+                  className="text-muted-foreground"
+                />
+                <YAxis 
+                  tick={{ fontSize: 12 }}
+                  className="text-muted-foreground"
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'hsl(var(--card))', 
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: '8px'
+                  }}
+                />
+                <Legend />
+                <Line 
+                  type="monotone" 
+                  dataKey="transactions" 
+                  name="Total Transactions"
+                  stroke="#3b82f6" 
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="fraud" 
+                  name="Fraud Incidents"
+                  stroke="#ef4444" 
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+              No trend data available
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card data-testid="card-pipeline">
           <CardHeader>
-            <CardTitle>Detection Pipeline</CardTitle>
-            <CardDescription>Real-time processing status</CardDescription>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <CardTitle>Detection Pipeline</CardTitle>
+                <CardDescription>Real-time processing status from /system/health</CardDescription>
+              </div>
+              {systemHealth && (
+                <Badge 
+                  variant="outline" 
+                  className={systemHealth.system_state === "HEALTHY" ? "text-[#00A307] border-[#00A307]" : "text-orange-500 border-orange-500"}
+                >
+                  {Object.values(systemHealth.modules || {}).filter(s => s === "ONLINE").length}/{Object.keys(systemHealth.modules || {}).length} Online
+                </Badge>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <div className="relative">
               <div className="absolute left-6 top-6 bottom-6 w-0.5 bg-border" />
               <div className="space-y-4 relative">
-                <div className="flex items-center gap-4" data-testid="pipeline-step-normalization">
-                  <div className="w-12 h-12 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center z-10">
-                    <Database className="w-6 h-6 text-primary" />
+                <div className="flex items-center gap-4" data-testid="pipeline-step-ingestion">
+                  <div className="w-12 h-12 rounded-lg bg-green-100 dark:bg-green-900 flex items-center justify-center z-10">
+                    <Database className="w-6 h-6 text-green-600" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="font-medium" data-testid="text-pipeline-normalization">Data Normalization</span>
-                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-normalization">Active</Badge>
+                      <span className="font-medium">Data Ingestion</span>
+                      {getStatusBadge("module_ingestion")}
                     </div>
-                    <p className="text-sm text-muted-foreground">Processing incoming streams</p>
+                    <p className="text-sm text-muted-foreground">Receiving transaction streams</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4" data-testid="pipeline-step-preprocessing">
+                  <div className="w-12 h-12 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center z-10">
+                    <Activity className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-medium">Preprocessing</span>
+                      {getStatusBadge("module_preprocessing")}
+                    </div>
+                    <p className="text-sm text-muted-foreground">Data normalization & validation</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-4" data-testid="pipeline-step-deduplication">
                   <div className="w-12 h-12 rounded-lg bg-pink-100 dark:bg-pink-900 flex items-center justify-center z-10">
-                    <Activity className="w-6 h-6 text-pink-600" />
+                    <Search className="w-6 h-6 text-pink-600" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="font-medium" data-testid="text-pipeline-deduplication">Deduplication Check</span>
-                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-deduplication">Active</Badge>
+                      <span className="font-medium">Deduplication Check</span>
+                      {getStatusBadge("module_deduplication")}
                     </div>
                     <p className="text-sm text-muted-foreground">Identifying duplicate transactions</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4" data-testid="pipeline-step-rule-fraud">
+                <div className="flex items-center gap-4" data-testid="pipeline-step-rule-check">
                   <div className="w-12 h-12 rounded-lg bg-orange-100 dark:bg-orange-900 flex items-center justify-center z-10">
                     <Gavel className="w-6 h-6 text-orange-600" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="font-medium" data-testid="text-pipeline-rule-fraud">Rule-based Fraud Check</span>
-                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-rule-fraud">Active</Badge>
+                      <span className="font-medium">Rule-based Fraud Check</span>
+                      {getStatusBadge("module_rule_check")}
                     </div>
                     <p className="text-sm text-muted-foreground">Rule violations detected</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4" data-testid="pipeline-step-ai-fraud">
+                <div className="flex items-center gap-4" data-testid="pipeline-step-ai-check">
                   <div className="w-12 h-12 rounded-lg bg-purple-100 dark:bg-purple-900 flex items-center justify-center z-10">
                     <Cpu className="w-6 h-6 text-purple-600" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="font-medium" data-testid="text-pipeline-ai-fraud">AI-based Fraud Check</span>
-                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-ai-fraud">Active</Badge>
+                      <span className="font-medium">AI-based Fraud Check</span>
+                      {getStatusBadge("module_ai_check")}
                     </div>
                     <p className="text-sm text-muted-foreground">XGBoost + Random Forest + Neural Net ensemble</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4" data-testid="pipeline-step-flagging">
+                <div className="flex items-center gap-4" data-testid="pipeline-step-flagger">
                   <div className="w-12 h-12 rounded-lg bg-red-100 dark:bg-red-900 flex items-center justify-center z-10">
                     <AlertTriangle className="w-6 h-6 text-destructive" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="font-medium" data-testid="text-pipeline-flagging">Flagging Service</span>
-                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-flagging">Active</Badge>
+                      <span className="font-medium">Flagging Service</span>
+                      {getStatusBadge("module_flagger")}
                     </div>
                     <p className="text-sm text-muted-foreground">{safeStats.flagged_transactions || 0} flagged this session</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4" data-testid="pipeline-step-dashboard">
+                <div className="flex items-center gap-4" data-testid="pipeline-step-query">
                   <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center z-10">
                     <BarChart3 className="w-6 h-6 text-primary" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="font-medium" data-testid="text-pipeline-dashboard">LLM-Assist Human Review</span>
-                      <Badge variant="outline" className="text-[#00A307]" data-testid="badge-status-dashboard">Active</Badge>
+                      <span className="font-medium">Query Service</span>
+                      {getStatusBadge("module_query")}
                     </div>
-                    <p className="text-sm text-muted-foreground">{safeStats.active_verdicts || 0} pending reviews</p>
+                    <p className="text-sm text-muted-foreground">Dashboard API & LLM Review</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4" data-testid="pipeline-step-logging">
+                  <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center z-10">
+                    <Activity className="w-6 h-6 text-gray-600" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-medium">Logging Service</span>
+                      {getStatusBadge("module_logging")}
+                    </div>
+                    <p className="text-sm text-muted-foreground">System monitoring & logs</p>
                   </div>
                 </div>
               </div>

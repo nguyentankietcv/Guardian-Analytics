@@ -1,0 +1,81 @@
+@app.get("/dashboard/trends")
+def dashboard_trends(response: Response):
+    try:
+        response.headers["Cache-Control"] = "public, max-age=60"
+        data = get_24h_transaction_trends()
+        return {"status": "success", "data": data}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Trends failed: {e}")
+        raise HTTPException(500, str(e))
+
+def get_24h_transaction_trends():
+    session = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        start_time = now - timedelta(hours=24)
+        stmt = select(Transaction.Timestamp, Verdict.status).join(Verdict)\
+               .where(Transaction.Timestamp >= start_time, Verdict.rule_flagged == 1, Verdict.ai_flagged == 1)
+        results = session.execute(stmt).all()
+        
+        hourly_total, hourly_fraud = defaultdict(int), defaultdict(int)
+        time_labels = []
+        curr = start_time.replace(minute=0, second=0, microsecond=0)
+        while curr <= now:
+            label = curr.strftime("%H:00")
+            time_labels.append(label)
+            hourly_total[label] = 0
+            hourly_fraud[label] = 0
+            curr += timedelta(hours=1)
+            
+        for row in results:
+            if row.Timestamp:
+                label = row.Timestamp.strftime("%H:00")
+                if label in hourly_total:
+                    hourly_total[label] += 1
+                    if row.status == 'FRAUD': hourly_fraud[label] += 1
+                    
+        return {
+            "labels": time_labels,
+            "datasets": [
+                {"label": "Total Transactions", "data": [hourly_total[l] for l in time_labels], "borderColor": "#3b82f6"},
+                {"label": "Fraud Incidents", "data": [hourly_fraud[l] for l in time_labels], "borderColor": "#ef4444"}
+            ]
+        }
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"labels": [], "datasets": []}
+    finally:
+        session.close()
+
+        
+@app.get("/system/health")
+def system_health(response: Response):
+    try:
+        # Short cache to prevent spamming psutil
+        response.headers["Cache-Control"] = "public, max-age=2"
+        status = check_pipeline_health()
+        
+        # Calculate overall system state
+        online_count = sum(1 for s in status.values() if s == "ONLINE")
+        total_count = len(EXPECTED_SERVICES)
+        system_state = "HEALTHY" if online_count == total_count else "DEGRADED"
+        
+        return {
+            "status": "success", 
+            "system_state": system_state,
+            "modules": status
+        }
+    except Exception as e:
+        send_log(logger, "ERROR", f"Health check failed: {e}")
+        raise HTTPException(500, str(e))
+
+ EXPECTED_SERVICES = [
+    "module_logging",
+    "module_flagger",
+    "module_ai_check",
+    "module_preprocessing",
+    "module_deduplication",
+    "module_ingestion",
+    "module_rule_check",
+    "module_query"
+]
