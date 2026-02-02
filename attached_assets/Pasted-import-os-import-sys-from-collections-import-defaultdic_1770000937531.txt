@@ -1,0 +1,197 @@
+import os
+import sys
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, select, func, case, desc
+from sqlalchemy.orm import sessionmaker, Session
+from init_db import Verdict, LLMReview, Transaction
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.dirname(current_dir))
+
+load_dotenv()
+engine = create_engine(os.getenv("DB_URL"))
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_transactions_full_info(status_filter="PASS"):
+    session = SessionLocal()
+    try:
+        stmt = select(
+            Verdict.Transaction_ID, Verdict.created_at, Verdict.ensemble_score,
+            Transaction.User_ID, Transaction.Transaction_Amount, Transaction.Transaction_Type,
+            Transaction.Timestamp, Transaction.ingested_at, Transaction.Account_Balance,
+            Transaction.Device_Type, Transaction.Location, Transaction.Merchant_Category,
+            Transaction.Card_Type, LLMReview.llm_analysis
+        ).join(Transaction, Verdict.Transaction_ID == Transaction.Transaction_ID)\
+         .outerjoin(LLMReview, Verdict.Transaction_ID == LLMReview.Transaction_ID)\
+         .where(Verdict.status == status_filter)
+        return session.execute(stmt).all()
+    except Exception as e:
+        print(f"Error: {e}")
+        return []
+    finally:
+        session.close()
+
+def get_dashboard_stats():
+    session = SessionLocal()
+    try:
+        stats = session.query(
+            func.count(Transaction.Transaction_ID).label("total_transactions"),
+            func.sum(case((Verdict.status.in_(['WARN', 'FRAUD']), 1), else_=0)).label("flagged_transactions"),
+            func.sum(case((Verdict.status == 'WARN', 1), else_=0)).label("active_verdicts"),
+            func.sum(case((Verdict.status == 'FRAUD', 1), else_=0)).label("confirmed_fraud"),
+            func.avg(case((Verdict.status == 'SAFE', 100), else_=0)).label("approval_rate"),
+            func.avg(Verdict.ensemble_score).label("avg_ensemble_score"),
+            func.avg(Verdict.rule_fraud_score).label("avg_risk_score")
+        ).select_from(Verdict).join(Transaction).filter(
+            Verdict.rule_flagged == 1, Verdict.ai_flagged == 1
+        ).first()
+        return stats
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+    finally:
+        session.close()
+
+def get_recent_verdicts(limit=5):
+    session = SessionLocal()
+    try:
+        stmt = select(
+            Verdict.Transaction_ID, Verdict.status, Verdict.ensemble_score,
+            Verdict.rule_fraud_score, Verdict.created_at, Transaction.Transaction_Amount,
+            Transaction.Location, Transaction.Transaction_Type, LLMReview.llm_analysis
+        ).join(Transaction, Verdict.Transaction_ID == Transaction.Transaction_ID)\
+         .outerjoin(LLMReview, Verdict.Transaction_ID == LLMReview.Transaction_ID)\
+         .where(Verdict.rule_flagged == 1, Verdict.ai_flagged == 1)\
+         .order_by(Verdict.created_at.desc()).limit(limit)
+        return session.execute(stmt).all()
+    except Exception as e:
+        print(f"Error: {e}")
+        return []
+    finally:
+        session.close()
+
+def get_flagged_alerts(min_score=0.7, status_filter=None):
+    session = SessionLocal()
+    try:
+        stmt = select(
+            Verdict.Transaction_ID, Verdict.ensemble_score, Verdict.rule_fraud_score,
+            Verdict.model_scores, Verdict.status, Verdict.reason_trail,
+            Transaction.Transaction_Amount, Transaction.Location,
+            Transaction.Transaction_Type, Transaction.Timestamp
+        ).join(Transaction, Verdict.Transaction_ID == Transaction.Transaction_ID)\
+         .where(Verdict.rule_flagged == 1, Verdict.ai_flagged == 1,
+                Verdict.ensemble_score >= min_score, Verdict.status.in_(['WARN']))
+        if status_filter:
+            stmt = stmt.where(Verdict.status == status_filter)
+        return session.execute(stmt.order_by(Verdict.ensemble_score.desc())).all()
+    except Exception as e:
+        print(f"Error: {e}")
+        return []
+    finally:
+        session.close()
+
+def get_human_review_queue():
+    session = SessionLocal()
+    try:
+        stmt = select(
+            Verdict.Transaction_ID, Verdict.ensemble_score, Verdict.status,
+            Transaction.User_ID, Transaction.Transaction_Amount, Transaction.Transaction_Type,
+            Transaction.Location, Transaction.Card_Age, Transaction.Transaction_Distance,
+            Transaction.Authentication_Method, Transaction.Daily_Transaction_Count,
+            LLMReview.llm_analysis, LLMReview.reviewed_at
+        ).join(Transaction, Verdict.Transaction_ID == Transaction.Transaction_ID)\
+         .join(LLMReview, Verdict.Transaction_ID == LLMReview.Transaction_ID)\
+         .where(Verdict.rule_flagged == 1, Verdict.ai_flagged == 1, Verdict.status == 'WARN')\
+         .order_by(Verdict.ensemble_score.desc())
+        return session.execute(stmt).all()
+    except Exception as e:
+        print(f"Error: {e}")
+        return []
+    finally:
+        session.close()
+
+def get_transaction_history(page=1, per_page=10, search_query=None, status_filter=None):
+    session = SessionLocal()
+    try:
+        stmt = select(
+            Transaction.Transaction_ID, Transaction.User_ID, Transaction.Transaction_Amount,
+            Transaction.Transaction_Type, Transaction.Location, Transaction.Card_Type,
+            Transaction.Timestamp, Verdict.ensemble_score, Verdict.status
+        ).join(Verdict, Transaction.Transaction_ID == Verdict.Transaction_ID)\
+         .where(Verdict.rule_flagged == 1, Verdict.ai_flagged == 1)
+        if status_filter:
+            stmt = stmt.where(Verdict.status == status_filter)
+        if search_query:
+            stmt = stmt.where((Transaction.Transaction_ID.ilike(f"%{search_query}%")) | 
+                              (Transaction.User_ID.ilike(f"%{search_query}%")))
+        offset = (page - 1) * per_page
+        return session.execute(stmt.order_by(Transaction.Timestamp.desc()).offset(offset).limit(per_page)).all()
+    except Exception as e:
+        print(f"Error: {e}")
+        return []
+    finally:
+        session.close()
+
+def update_verdict_status(transaction_id, action, reason=None):
+    session = SessionLocal()
+    try:
+        verdict = session.query(Verdict).filter(Verdict.Transaction_ID == transaction_id).first()
+        if verdict:
+            if action == 'APPROVE': verdict.status = 'SAFE'
+            elif action == 'BLOCK': verdict.status = 'FRAUD'
+            if reason:
+                verdict.reason_trail = f"{verdict.reason_trail or ''} \n[Human Action: {action}] {reason}"
+            session.commit()
+            return True
+        return False
+    except Exception as e:
+        session.rollback()
+        print(f"Error: {e}")
+        return False
+    finally:
+        session.close()
+
+def get_24h_transaction_trends():
+    session = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        start_time = now - timedelta(hours=24)
+        stmt = select(Transaction.Timestamp, Verdict.status).join(Verdict)\
+               .where(Transaction.Timestamp >= start_time, Verdict.rule_flagged == 1, Verdict.ai_flagged == 1)
+        results = session.execute(stmt).all()
+        
+        hourly_total, hourly_fraud = defaultdict(int), defaultdict(int)
+        time_labels = []
+        curr = start_time.replace(minute=0, second=0, microsecond=0)
+        while curr <= now:
+            label = curr.strftime("%H:00")
+            time_labels.append(label)
+            hourly_total[label] = 0
+            hourly_fraud[label] = 0
+            curr += timedelta(hours=1)
+            
+        for row in results:
+            if row.Timestamp:
+                label = row.Timestamp.strftime("%H:00")
+                if label in hourly_total:
+                    hourly_total[label] += 1
+                    if row.status == 'FRAUD': hourly_fraud[label] += 1
+                    
+        return {
+            "labels": time_labels,
+            "datasets": [
+                {"label": "Total Transactions", "data": [hourly_total[l] for l in time_labels], "borderColor": "#3b82f6"},
+                {"label": "Fraud Incidents", "data": [hourly_fraud[l] for l in time_labels], "borderColor": "#ef4444"}
+            ]
+        }
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"labels": [], "datasets": []}
+    finally:
+        session.close()
+
+if __name__ == "__main__":
+    data = get_transactions_full_info(status_filter="WARN")
+    print(len(data))

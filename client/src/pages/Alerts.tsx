@@ -1,6 +1,9 @@
+import { useState } from "react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { 
   ShieldAlert, 
   Cpu, 
@@ -11,19 +14,45 @@ import {
   Eye,
   AlertTriangle
 } from "lucide-react";
-import { mockVerdicts, mockTransactions, type Verdict } from "@/lib/mockData";
+import RefreshControls from "@/components/RefreshControls";
+import { fetchAlerts, updateVerdict, type Alert } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Alerts() {
-  const getStatusBadge = (status: Verdict["status"]) => {
+  const [refreshInterval, setRefreshInterval] = useState(0);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: alerts, isLoading, isFetching } = useQuery<Alert[]>({
+    queryKey: ["/alerts"],
+    queryFn: () => fetchAlerts(0.7),
+    refetchInterval: refreshInterval || false,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ transactionId, action }: { transactionId: string; action: "APPROVE" | "BLOCK" }) =>
+      updateVerdict(transactionId, action),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/alerts"] });
+      toast({ title: "Verdict updated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update verdict", variant: "destructive" });
+    },
+  });
+
+  const handleManualRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["/alerts"] });
+  };
+
+  const getStatusBadge = (status: string) => {
     switch (status) {
-      case "pending":
-        return <Badge variant="outline" className="border-orange-500 text-orange-600">Pending</Badge>;
-      case "reviewing":
-        return <Badge variant="outline" className="border-blue-500 text-blue-600">Reviewing</Badge>;
-      case "approved":
-        return <Badge variant="outline" className="border-[#00A307] text-[#00A307]">Approved</Badge>;
-      case "rejected":
-        return <Badge className="bg-destructive text-destructive-foreground">Rejected</Badge>;
+      case "WARN":
+        return <Badge variant="outline" className="border-orange-500 text-orange-600">Warning</Badge>;
+      case "FRAUD":
+        return <Badge className="bg-destructive text-destructive-foreground">Fraud</Badge>;
+      case "SAFE":
+        return <Badge variant="outline" className="border-[#00A307] text-[#00A307]">Safe</Badge>;
       default:
         return <Badge variant="secondary">{status}</Badge>;
     }
@@ -42,45 +71,28 @@ export default function Alerts() {
     return <Badge className="bg-blue-500 text-white">Low ({(score * 100).toFixed(0)}%)</Badge>;
   };
 
-  const getFlagIcon = (verdict: Verdict) => {
-    if (verdict.ai_flagged && verdict.rule_flagged) {
-      return <ShieldAlert className="w-5 h-5 text-destructive" />;
-    }
-    if (verdict.ai_flagged) {
-      return <Cpu className="w-5 h-5 text-purple-500" />;
-    }
-    return <Gavel className="w-5 h-5 text-orange-500" />;
-  };
-
-  const getFlagBgColor = (verdict: Verdict) => {
-    if (verdict.ai_flagged && verdict.rule_flagged) {
-      return "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800";
-    }
-    if (verdict.ai_flagged) {
-      return "bg-purple-50 dark:bg-purple-950 border-purple-200 dark:border-purple-800";
-    }
-    return "bg-orange-50 dark:bg-orange-950 border-orange-200 dark:border-orange-800";
-  };
-
-  const getTransaction = (transactionId: string) => {
-    return mockTransactions.find(t => t.Transaction_ID === transactionId);
-  };
-
-  const pendingVerdicts = mockVerdicts.filter(v => v.status === "pending" || v.status === "reviewing");
-  const criticalVerdicts = mockVerdicts.filter(v => v.ensemble_score >= 0.9);
-  const highVerdicts = mockVerdicts.filter(v => v.ensemble_score >= 0.7 && v.ensemble_score < 0.9);
+  const alertsList = alerts || [];
+  const criticalAlerts = alertsList.filter((a) => a.ensemble_score >= 0.9);
+  const highAlerts = alertsList.filter((a) => a.ensemble_score >= 0.7 && a.ensemble_score < 0.9);
+  const reviewingAlerts = alertsList.filter((a) => a.status === "WARN");
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Alerts</h1>
           <p className="text-base text-[#9F9F9F]">Flagged transactions requiring review</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <RefreshControls
+            refreshInterval={refreshInterval}
+            onRefreshIntervalChange={setRefreshInterval}
+            onManualRefresh={handleManualRefresh}
+            isRefreshing={isFetching}
+          />
           <Badge variant="outline" className="gap-1 border-destructive text-destructive">
             <AlertTriangle className="w-3 h-3" />
-            {pendingVerdicts.length} Active
+            {alertsList.length} Active
           </Badge>
         </div>
       </div>
@@ -92,10 +104,14 @@ export default function Alerts() {
             <ShieldAlert className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-destructive">
-              {criticalVerdicts.length}
-            </div>
-            <p className="text-xs text-muted-foreground">Immediate action required</p>
+            {isLoading ? (
+              <Skeleton className="h-8 w-12" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-destructive">{criticalAlerts.length}</div>
+                <p className="text-xs text-muted-foreground">Immediate action required</p>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -105,10 +121,14 @@ export default function Alerts() {
             <AlertTriangle className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-500">
-              {highVerdicts.length}
-            </div>
-            <p className="text-xs text-muted-foreground">Review within 1 hour</p>
+            {isLoading ? (
+              <Skeleton className="h-8 w-12" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-orange-500">{highAlerts.length}</div>
+                <p className="text-xs text-muted-foreground">Review within 1 hour</p>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -118,10 +138,14 @@ export default function Alerts() {
             <Eye className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-primary">
-              {mockVerdicts.filter(v => v.status === "reviewing").length}
-            </div>
-            <p className="text-xs text-muted-foreground">Currently being analyzed</p>
+            {isLoading ? (
+              <Skeleton className="h-8 w-12" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-primary">{reviewingAlerts.length}</div>
+                <p className="text-xs text-muted-foreground">Currently being analyzed</p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -133,68 +157,92 @@ export default function Alerts() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {mockVerdicts.map((verdict) => {
-              const transaction = getTransaction(verdict.Transaction_ID);
-              return (
+            {isLoading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="p-4 rounded-lg border bg-muted/50">
+                  <div className="flex items-start gap-4">
+                    <Skeleton className="w-5 h-5" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-3 w-64" />
+                      <Skeleton className="h-3 w-32" />
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : alertsList.length === 0 ? (
+              <div className="text-center text-muted-foreground py-8">
+                No flagged transactions found
+              </div>
+            ) : (
+              alertsList.map((alert, index) => (
                 <div
-                  key={verdict.id}
-                  className={`p-4 rounded-lg border ${getFlagBgColor(verdict)}`}
-                  data-testid={`card-verdict-${verdict.id}`}
+                  key={alert.Transaction_ID}
+                  className="p-4 rounded-lg border bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800"
+                  data-testid={`card-alert-${index}`}
                 >
                   <div className="flex items-start gap-4">
                     <div className="mt-0.5">
-                      {getFlagIcon(verdict)}
+                      <ShieldAlert className="w-5 h-5 text-destructive" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-2">
-                        <span className="font-semibold font-mono">{verdict.Transaction_ID}</span>
-                        {getEnsembleScoreBadge(verdict.ensemble_score)}
-                        {getStatusBadge(verdict.status)}
-                        {verdict.rule_flagged === 1 && (
-                          <Badge variant="outline" className="gap-1">
-                            <Gavel className="w-3 h-3" />
-                            Rule
-                          </Badge>
-                        )}
-                        {verdict.ai_flagged === 1 && (
-                          <Badge variant="outline" className="gap-1">
-                            <Cpu className="w-3 h-3" />
-                            AI
-                          </Badge>
-                        )}
+                        <span className="font-semibold font-mono">{alert.Transaction_ID}</span>
+                        {getEnsembleScoreBadge(alert.ensemble_score || 0)}
+                        {getStatusBadge(alert.status)}
+                        <Badge variant="outline" className="gap-1">
+                          <Gavel className="w-3 h-3" />
+                          Rule
+                        </Badge>
+                        <Badge variant="outline" className="gap-1">
+                          <Cpu className="w-3 h-3" />
+                          AI
+                        </Badge>
                       </div>
                       
-                      {transaction && (
-                        <div className="flex items-center gap-4 text-sm mb-2 text-muted-foreground">
-                          <span>Amount: <span className="font-semibold text-foreground">${transaction.Transaction_Amount.toLocaleString()}</span></span>
-                          <span>Location: <span className="font-medium text-foreground">{transaction.Location}</span></span>
-                          <span>Type: <span className="font-medium text-foreground">{transaction.Transaction_Type}</span></span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-4 text-sm mb-2 text-muted-foreground flex-wrap">
+                        <span>Amount: <span className="font-semibold text-foreground">${(alert.Transaction_Amount || 0).toLocaleString()}</span></span>
+                        <span>Location: <span className="font-medium text-foreground">{alert.Location}</span></span>
+                        <span>Type: <span className="font-medium text-foreground">{alert.Transaction_Type}</span></span>
+                      </div>
                       
-                      <p className="text-sm text-foreground mb-2">{verdict.reason_trail}</p>
+                      <p className="text-sm text-foreground mb-2">{alert.reason_trail || "No reason trail available"}</p>
                       
                       <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                         <span className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
-                          {new Date(verdict.created_at).toLocaleString()}
+                          {alert.Timestamp ? new Date(alert.Timestamp).toLocaleString() : 'N/A'}
                         </span>
-                        <span>Rule Score: <span className="font-semibold">{(verdict.rule_fraud_score * 100).toFixed(0)}%</span></span>
-                        <span>Model Scores: XGB {(verdict.model_scores.xgboost * 100).toFixed(0)}% | RF {(verdict.model_scores.random_forest * 100).toFixed(0)}% | NN {(verdict.model_scores.neural_net * 100).toFixed(0)}%</span>
+                        <span>Rule Score: <span className="font-semibold">{((alert.rule_fraud_score || 0) * 100).toFixed(0)}%</span></span>
+                        {alert.model_scores && (
+                          <span>Model Scores: XGB {((alert.model_scores.xgboost || 0) * 100).toFixed(0)}% | RF {((alert.model_scores.random_forest || 0) * 100).toFixed(0)}% | NN {((alert.model_scores.neural_net || 0) * 100).toFixed(0)}%</span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon" data-testid={`button-approve-${verdict.id}`}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => updateMutation.mutate({ transactionId: alert.Transaction_ID, action: "APPROVE" })}
+                        disabled={updateMutation.isPending}
+                        data-testid={`button-approve-${index}`}
+                      >
                         <CheckCircle className="h-4 w-4 text-[#00A307]" />
                       </Button>
-                      <Button variant="ghost" size="icon" data-testid={`button-reject-${verdict.id}`}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => updateMutation.mutate({ transactionId: alert.Transaction_ID, action: "BLOCK" })}
+                        disabled={updateMutation.isPending}
+                        data-testid={`button-reject-${index}`}
+                      >
                         <XCircle className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
                   </div>
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
         </CardContent>
       </Card>

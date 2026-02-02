@@ -1,0 +1,155 @@
+import os
+import sys
+import zmq
+import uvicorn
+from pathlib import Path
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Response
+from pydantic import BaseModel
+from typing import Optional, List, Any
+from decimal import Decimal
+from datetime import datetime
+
+current_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(current_dir))
+
+from query import (
+    get_dashboard_stats, 
+    get_recent_verdicts, 
+    get_flagged_alerts, 
+    get_human_review_queue, 
+    get_transaction_history, 
+    update_verdict_status, 
+    get_24h_transaction_trends
+)
+
+load_dotenv()
+
+LOG_PORT = int(os.getenv("LOG_PORT", "8004"))
+LOCALHOST = os.getenv("LOCALHOST", "localhost")
+QUERY_PORT = int(os.getenv("QUERY_PORT", "9000"))
+
+logger: Optional[zmq.Socket] = None
+
+def get_logger_socket():
+    global logger
+    if logger is not None: return logger
+    try:
+        ctx = zmq.Context()
+        sock = ctx.socket(zmq.PUSH)
+        sock.setsockopt(zmq.LINGER, 1000)
+        sock.connect(f"tcp://{LOCALHOST}:{LOG_PORT}")
+        logger = sock
+        return logger
+    except Exception: return None
+
+def send_log(sock, level: str, msg: str, service: str = "QUERY"):
+    if sock is None: return
+    try:
+        sock.send_json({"service": service, "level": level, "message": msg}, flags=zmq.NOBLOCK)
+    except zmq.ZMQError: pass
+
+def serialize(data):
+    if isinstance(data, list):
+        return [serialize(item) for item in data]
+    if hasattr(data, "_asdict"):
+        data = data._asdict()
+    if isinstance(data, dict):
+        return {k: serialize(v) for k, v in data.items()}
+    if isinstance(data, Decimal):
+        return float(data)
+    if isinstance(data, datetime):
+        return data.isoformat()
+    return data
+
+app = FastAPI()
+
+class VerdictUpdateRequest(BaseModel):
+    transaction_id: str
+    action: str
+    reason: Optional[str] = None
+
+@app.on_event("startup")
+async def startup_event():
+    global logger
+    logger = get_logger_socket()
+    send_log(logger, "INFO", "Query API started")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global logger
+    if logger:
+        send_log(logger, "INFO", "Query API shutting down")
+        logger.close()
+
+@app.get("/dashboard/stats")
+def dashboard_stats(response: Response):
+    try:
+        response.headers["Cache-Control"] = "public, max-age=5"
+        data = get_dashboard_stats()
+        send_log(logger, "DEBUG", "Fetched dashboard stats")
+        return {"status": "success", "data": serialize(data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Stats failed: {e}")
+        raise HTTPException(500, str(e))
+
+@app.get("/dashboard/trends")
+def dashboard_trends(response: Response):
+    try:
+        response.headers["Cache-Control"] = "public, max-age=60"
+        data = get_24h_transaction_trends()
+        return {"status": "success", "data": data}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Trends failed: {e}")
+        raise HTTPException(500, str(e))
+
+@app.get("/dashboard/recent")
+def recent_verdicts(limit: int = 5):
+    try:
+        data = get_recent_verdicts(limit)
+        return {"status": "success", "data": serialize(data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Recent verdicts failed: {e}")
+        raise HTTPException(500, str(e))
+
+@app.get("/alerts")
+def alerts(min_score: float = 0.7, status: Optional[str] = None):
+    try:
+        data = get_flagged_alerts(min_score, status)
+        return {"status": "success", "count": len(data), "data": serialize(data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Alerts failed: {e}")
+        raise HTTPException(500, str(e))
+
+@app.get("/reviews")
+def review_queue():
+    try:
+        data = get_human_review_queue()
+        return {"status": "success", "count": len(data), "data": serialize(data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"Review queue failed: {e}")
+        raise HTTPException(500, str(e))
+
+@app.get("/transactions")
+def transactions(page: int = 1, per_page: int = 20, search: Optional[str] = None, status: Optional[str] = None):
+    try:
+        data = get_transaction_history(page, per_page, search, status)
+        return {"status": "success", "count": len(data), "page": page, "data": serialize(data)}
+    except Exception as e:
+        send_log(logger, "ERROR", f"History failed: {e}")
+        raise HTTPException(500, str(e))
+
+@app.post("/verdict/update")
+def update_verdict(req: VerdictUpdateRequest):
+    try:
+        success = update_verdict_status(req.transaction_id, req.action, req.reason)
+        if success:
+            send_log(logger, "INFO", f"Updated verdict {req.transaction_id} to {req.action}")
+            return {"status": "success", "message": "Verdict updated"}
+        raise HTTPException(404, "Transaction not found")
+    except Exception as e:
+        send_log(logger, "ERROR", f"Update failed: {e}")
+        raise HTTPException(500, str(e))
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host=LOCALHOST, port=QUERY_PORT, reload=False)
