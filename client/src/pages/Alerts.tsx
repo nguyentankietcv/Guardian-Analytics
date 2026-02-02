@@ -12,10 +12,12 @@ import {
   CheckCircle,
   XCircle,
   Eye,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCcw
 } from "lucide-react";
+import { Alert as AlertComponent, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
-import { fetchAlerts, updateVerdict, type Alert } from "@/lib/api";
+import { fetchAlerts, updateVerdict, type Alert as AlertData } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Alerts() {
@@ -23,7 +25,7 @@ export default function Alerts() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data: alerts, isLoading, isFetching } = useQuery<Alert[]>({
+  const { data: alerts, isLoading, isFetching, isError, refetch } = useQuery<AlertData[]>({
     queryKey: ["/alerts"],
     queryFn: () => fetchAlerts(0.7),
     refetchInterval: refreshInterval || false,
@@ -96,6 +98,20 @@ export default function Alerts() {
           </Badge>
         </div>
       </div>
+
+      {isError && (
+        <AlertComponent variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Connection Error</AlertTitle>
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>Unable to fetch alerts. Make sure the backend is running at localhost:9000.</span>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCcw className="h-4 w-4 mr-1" />
+              Retry
+            </Button>
+          </AlertDescription>
+        </AlertComponent>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card data-testid="card-critical-alerts">

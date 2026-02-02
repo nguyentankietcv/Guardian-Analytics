@@ -14,8 +14,10 @@ import {
   AlertTriangle,
   ArrowRight,
   MapPin,
-  CreditCard
+  CreditCard,
+  RefreshCcw
 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
 import { fetchReviews, updateVerdict, type Review } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -25,7 +27,7 @@ export default function Reviews() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data: reviews, isLoading, isFetching } = useQuery<Review[]>({
+  const { data: reviews, isLoading, isFetching, isError, refetch } = useQuery<Review[]>({
     queryKey: ["/reviews"],
     queryFn: fetchReviews,
     refetchInterval: refreshInterval || false,
@@ -101,6 +103,20 @@ export default function Reviews() {
           </Badge>
         </div>
       </div>
+
+      {isError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Connection Error</AlertTitle>
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>Unable to fetch reviews. Make sure the backend is running at localhost:9000.</span>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCcw className="h-4 w-4 mr-1" />
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card data-testid="card-pending-count">

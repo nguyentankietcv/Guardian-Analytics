@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Table,
   TableBody,
@@ -13,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, Filter, Eye, MoreHorizontal, MapPin, CreditCard, Smartphone, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Filter, Eye, MoreHorizontal, MapPin, Smartphone, ChevronLeft, ChevronRight, AlertTriangle, RefreshCcw } from "lucide-react";
 import RefreshControls from "@/components/RefreshControls";
 import { fetchTransactions, type TransactionRecord } from "@/lib/api";
 
@@ -24,7 +25,7 @@ export default function Transactions() {
   const perPage = 10;
   const queryClient = useQueryClient();
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError, refetch } = useQuery<{ data: TransactionRecord[]; count: number; page: number }>({
     queryKey: ["/transactions", page, perPage, searchTerm],
     queryFn: () => fetchTransactions(page, perPage, searchTerm || undefined),
     refetchInterval: refreshInterval || false,
@@ -77,6 +78,20 @@ export default function Transactions() {
           isRefreshing={isFetching}
         />
       </div>
+
+      {isError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Connection Error</AlertTitle>
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>Unable to fetch transactions. Make sure the backend is running at localhost:9000.</span>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCcw className="h-4 w-4 mr-1" />
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card data-testid="card-transactions-table">
         <CardHeader>

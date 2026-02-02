@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { 
   CreditCard, 
   AlertTriangle, 
@@ -16,8 +17,10 @@ import {
   UserCheck,
   Bot,
   Gavel,
-  Activity
+  Activity,
+  RefreshCcw
 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
 import { fetchDashboardStats, fetchRecentVerdicts, type DashboardStats, type RecentVerdict } from "@/lib/api";
 
@@ -25,13 +28,13 @@ export default function Dashboard() {
   const [refreshInterval, setRefreshInterval] = useState(0);
   const queryClient = useQueryClient();
 
-  const { data: stats, isLoading: statsLoading, isFetching: statsFetching } = useQuery<DashboardStats | null>({
+  const { data: stats, isLoading: statsLoading, isFetching: statsFetching, isError: statsError, refetch: refetchStats } = useQuery<DashboardStats | null>({
     queryKey: ["/dashboard/stats"],
     queryFn: fetchDashboardStats,
     refetchInterval: refreshInterval || false,
   });
 
-  const { data: recentVerdicts, isLoading: verdictsLoading } = useQuery<RecentVerdict[]>({
+  const { data: recentVerdicts, isLoading: verdictsLoading, isError: verdictsError, refetch: refetchVerdicts } = useQuery<RecentVerdict[]>({
     queryKey: ["/dashboard/recent"],
     queryFn: () => fetchRecentVerdicts(5),
     refetchInterval: refreshInterval || false,
@@ -81,6 +84,20 @@ export default function Dashboard() {
           </Badge>
         </div>
       </div>
+
+      {(statsError || verdictsError) && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Connection Error</AlertTitle>
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>Unable to fetch data from the API. Make sure the backend is running at localhost:9000.</span>
+            <Button variant="outline" size="sm" onClick={() => { refetchStats(); refetchVerdicts(); }}>
+              <RefreshCcw className="h-4 w-4 mr-1" />
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card data-testid="card-total-transactions">
