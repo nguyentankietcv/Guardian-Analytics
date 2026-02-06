@@ -50,11 +50,19 @@ export default function TransactionDetailsModal({
   };
 
   const ensembleScore = transaction.ensemble_score || 0;
-  const riskScore = ('Risk_Score' in transaction ? transaction.Risk_Score : 0) || 0;
-  const ruleFraudScore = ('rule_fraud_score' in transaction ? transaction.rule_fraud_score : 0) || 0;
-  const modelScores = ('model_scores' in transaction ? transaction.model_scores : null);
-  const reasonTrail = ('reason_trail' in transaction ? transaction.reason_trail : null);
-  const llmAnalysis = ('llm_analysis' in transaction ? transaction.llm_analysis : null);
+  const ruleFraudScore = transaction.rule_fraud_score || 0;
+  const modelScores = transaction.model_scores;
+  const reasonTrail = transaction.reason_trail;
+  const llmAnalysis = transaction.llm_analysis;
+
+  const MODEL_LABELS: Record<string, string> = {
+    dnn: "DNN",
+    xgboost: "XGBoost",
+    graphsage: "GraphSAGE",
+    iso_forest: "Iso Forest",
+    rule_check: "Rule Check",
+    transformer: "Transformer",
+  };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -141,41 +149,63 @@ export default function TransactionDetailsModal({
             </div>
           </div>
 
-          {'Device_Type' in transaction && transaction.Device_Type && (
-            <>
-              <Separator />
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Device Type</p>
-                  <p className="font-medium">{transaction.Device_Type}</p>
-                </div>
-                {'Merchant_Category' in transaction && transaction.Merchant_Category && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">Merchant Category</p>
-                    <p className="font-medium">{transaction.Merchant_Category}</p>
-                  </div>
-                )}
-                {'Daily_Transaction_Count' in transaction && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">Daily Txn Count</p>
-                    <p className="font-medium">{transaction.Daily_Transaction_Count}</p>
-                  </div>
-                )}
-                {'Transaction_Distance' in transaction && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">Distance</p>
-                    <p className="font-medium">{transaction.Transaction_Distance?.toLocaleString()} km</p>
-                  </div>
-                )}
-                {'Authentication_Method' in transaction && transaction.Authentication_Method && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">Auth Method</p>
-                    <p className="font-medium">{transaction.Authentication_Method}</p>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+          <Separator />
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div>
+              <p className="text-sm text-muted-foreground">Device Type</p>
+              <p className="font-medium">{transaction.Device_Type}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Merchant Category</p>
+              <p className="font-medium">{transaction.Merchant_Category}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Daily Txn Count</p>
+              <p className="font-medium">{transaction.Daily_Transaction_Count}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Distance</p>
+              <p className="font-medium">{transaction.Transaction_Distance?.toLocaleString()} km</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Auth Method</p>
+              <p className="font-medium">{transaction.Authentication_Method}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Card Age</p>
+              <p className="font-medium">{transaction.Card_Age} days</p>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div>
+              <p className="text-sm text-muted-foreground">Account Balance</p>
+              <p className="font-medium">${(transaction.Account_Balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Unusual IP</p>
+              <p className="font-medium">{transaction.IP_Address_Flag ? "Yes" : "No"}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Prior Fraud</p>
+              <p className="font-medium">{transaction.Previous_Fraudulent_Activity ? "Yes" : "No"}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Avg 7-Day Amount</p>
+              <p className="font-medium">${(transaction.Avg_Transaction_Amount_7d || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Failed Txn (7d)</p>
+              <p className="font-medium">{transaction.Failed_Transaction_Count_7d || 0}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Weekend Transaction</p>
+              <p className="font-medium">{transaction.Is_Weekend ? "Yes" : "No"}</p>
+            </div>
+          </div>
 
           <Separator />
 
@@ -184,17 +214,11 @@ export default function TransactionDetailsModal({
               <Cpu className="w-4 h-4 text-primary" />
               Detection Scores
             </h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div className="bg-muted/50 rounded-lg p-3">
                 <p className="text-xs text-muted-foreground">Ensemble Score</p>
                 <p className={`text-lg font-bold ${getEnsembleColor(ensembleScore)}`}>
                   {(ensembleScore * 100).toFixed(0)}%
-                </p>
-              </div>
-              <div className="bg-muted/50 rounded-lg p-3">
-                <p className="text-xs text-muted-foreground">Risk Score</p>
-                <p className="text-lg font-bold">
-                  {(riskScore * 100).toFixed(0)}%
                 </p>
               </div>
               <div className="bg-muted/50 rounded-lg p-3">
@@ -210,10 +234,10 @@ export default function TransactionDetailsModal({
             {modelScores && Object.keys(modelScores).length > 0 && (
               <div className="bg-muted/50 rounded-lg p-4">
                 <p className="text-sm font-medium mb-2">Model Breakdown</p>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                   {Object.entries(modelScores).map(([model, score]) => (
-                    <div key={model} className="text-center">
-                      <p className="text-xs text-muted-foreground capitalize">{model.replace(/_/g, ' ')}</p>
+                    <div key={model} className="text-center bg-background rounded-md p-2">
+                      <p className="text-xs text-muted-foreground">{MODEL_LABELS[model] || model}</p>
                       <p className="font-semibold">{((score || 0) * 100).toFixed(0)}%</p>
                     </div>
                   ))}

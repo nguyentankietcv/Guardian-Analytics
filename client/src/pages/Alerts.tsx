@@ -9,14 +9,11 @@ import {
   Cpu, 
   Gavel, 
   Clock, 
-  CheckCircle,
-  XCircle,
   Eye,
   AlertTriangle,
-  RefreshCcw,
-  Brain
+  Brain,
+  Trash2
 } from "lucide-react";
-import { Alert as AlertComponent, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
 import Pagination from "@/components/Pagination";
 import FilterDropdown from "@/components/FilterDropdown";
@@ -48,7 +45,7 @@ export default function Alerts() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data, isLoading, isFetching, isError, refetch } = useQuery<PaginatedResponse<AlertData>>({
+  const { data, isLoading, isFetching } = useQuery<PaginatedResponse<AlertData>>({
     queryKey: ["/alerts", page, perPage, statusFilter, sortBy, sortOrder],
     queryFn: () => fetchAlerts({
       minScore: 0.5,
@@ -70,9 +67,6 @@ export default function Alerts() {
       queryClient.invalidateQueries({ queryKey: ["/dashboard/stats"] });
       toast({ title: "Verdict updated successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to update verdict", variant: "destructive" });
-    },
   });
 
   const llmMutation = useMutation({
@@ -80,27 +74,13 @@ export default function Alerts() {
       sendToLLM(transactionId, reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/alerts"] });
-      queryClient.invalidateQueries({ queryKey: ["/reviews"] });
       toast({ title: "Sent to LLM for analysis" });
       setLlmDialogOpen(false);
-    },
-    onError: () => {
-      toast({ title: "Failed to send to LLM", variant: "destructive" });
     },
   });
 
   const handleManualRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/alerts"] });
-  };
-
-  const handleViewDetails = (alert: AlertData) => {
-    setSelectedAlert(alert);
-    setDetailsOpen(true);
-  };
-
-  const handleSendToLLM = (transactionId: string) => {
-    setLlmTransactionId(transactionId);
-    setLlmDialogOpen(true);
   };
 
   const getStatusBadge = (status: string) => {
@@ -129,6 +109,10 @@ export default function Alerts() {
     return <Badge className="bg-blue-500 text-white">Low ({(score * 100).toFixed(0)}%)</Badge>;
   };
 
+  const formatModelScore = (score: number | undefined) => {
+    return score != null ? `${(score * 100).toFixed(0)}%` : 'N/A';
+  };
+
   const alertsList = data?.data || [];
   const totalItems = data?.total || 0;
   const totalPages = Math.ceil(totalItems / perPage) || 1;
@@ -141,10 +125,38 @@ export default function Alerts() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Alerts</h1>
-          <p className="text-base text-[#9F9F9F]">Flagged transactions requiring review</p>
+          <h1 className="text-[24px] font-semibold text-foreground" data-testid="text-page-title">Alerts</h1>
+          <p className="text-base text-muted-foreground">Flagged transactions requiring review</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1 text-destructive border-destructive"
+            onClick={() => {
+              const fraudAlerts = alertsList.filter(a => a.status === "FRAUD");
+              fraudAlerts.forEach(a => updateMutation.mutate({ transactionId: a.Transaction_ID, action: "BLOCK" }));
+            }}
+            disabled={updateMutation.isPending}
+            data-testid="button-discard-fraud"
+          >
+            <Trash2 className="w-3 h-3" />
+            Discard All Fraud
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1 text-orange-500 border-orange-500"
+            onClick={() => {
+              const warnAlerts = alertsList.filter(a => a.status === "WARN");
+              warnAlerts.forEach(a => updateMutation.mutate({ transactionId: a.Transaction_ID, action: "BLOCK" }));
+            }}
+            disabled={updateMutation.isPending}
+            data-testid="button-discard-warns"
+          >
+            <Trash2 className="w-3 h-3" />
+            Discard All Warns
+          </Button>
           <RefreshControls
             refreshInterval={refreshInterval}
             onRefreshIntervalChange={setRefreshInterval}
@@ -157,20 +169,6 @@ export default function Alerts() {
           </Badge>
         </div>
       </div>
-
-      {isError && (
-        <AlertComponent variant="destructive" className="mb-4">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Connection Error</AlertTitle>
-          <AlertDescription className="flex items-center justify-between gap-4">
-            <span>Unable to fetch alerts. Make sure the backend is running at localhost:9000.</span>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              <RefreshCcw className="h-4 w-4 mr-1" />
-              Retry
-            </Button>
-          </AlertDescription>
-        </AlertComponent>
-      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card data-testid="card-critical-alerts">
@@ -275,13 +273,13 @@ export default function Alerts() {
                         <span className="font-semibold font-mono">{alert.Transaction_ID}</span>
                         {getEnsembleScoreBadge(alert.ensemble_score || 0)}
                         {getStatusBadge(alert.status)}
-                        {alert.rule_fraud_score && alert.rule_fraud_score > 0.5 && (
+                        {alert.rule_flagged && (
                           <Badge variant="outline" className="gap-1">
                             <Gavel className="w-3 h-3" />
                             Rule
                           </Badge>
                         )}
-                        {alert.ensemble_score && alert.ensemble_score > 0.5 && (
+                        {alert.ai_flagged && (
                           <Badge variant="outline" className="gap-1">
                             <Cpu className="w-3 h-3" />
                             AI
@@ -302,9 +300,11 @@ export default function Alerts() {
                           <Clock className="w-3 h-3" />
                           {alert.Timestamp ? new Date(alert.Timestamp).toLocaleString() : 'N/A'}
                         </span>
-                        <span>Rule Score: <span className="font-semibold">{((alert.rule_fraud_score || 0) * 100).toFixed(0)}%</span></span>
+                        <span>Rule Score: <span className="font-semibold">{formatModelScore(alert.rule_fraud_score)}</span></span>
                         {alert.model_scores && (
-                          <span>Model Scores: XGB {((alert.model_scores.xgboost || 0) * 100).toFixed(0)}% | RF {((alert.model_scores.random_forest || 0) * 100).toFixed(0)}% | NN {((alert.model_scores.neural_net || 0) * 100).toFixed(0)}%</span>
+                          <span>
+                            NN {formatModelScore(alert.model_scores.dnn)} | XGB {formatModelScore(alert.model_scores.xgboost)} | GS {formatModelScore(alert.model_scores.graphsage)} | IF {formatModelScore(alert.model_scores.iso_forest)} | Rule {formatModelScore(alert.model_scores.rule_check)} | TR {formatModelScore(alert.model_scores.transformer)}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -312,7 +312,7 @@ export default function Alerts() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => handleViewDetails(alert)}
+                        onClick={() => { setSelectedAlert(alert); setDetailsOpen(true); }}
                         data-testid={`button-view-${index}`}
                       >
                         <Eye className="h-4 w-4" />
@@ -320,7 +320,7 @@ export default function Alerts() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => handleSendToLLM(alert.Transaction_ID)}
+                        onClick={() => { setLlmTransactionId(alert.Transaction_ID); setLlmDialogOpen(true); }}
                         data-testid={`button-llm-${index}`}
                       >
                         <Brain className="h-4 w-4 text-primary" />
@@ -328,20 +328,11 @@ export default function Alerts() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => updateMutation.mutate({ transactionId: alert.Transaction_ID, action: "APPROVE" })}
-                        disabled={updateMutation.isPending || alert.status === "SAFE"}
-                        data-testid={`button-approve-${index}`}
-                      >
-                        <CheckCircle className="h-4 w-4 text-[#00A307]" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
                         onClick={() => updateMutation.mutate({ transactionId: alert.Transaction_ID, action: "BLOCK" })}
-                        disabled={updateMutation.isPending || alert.status === "FRAUD"}
+                        disabled={updateMutation.isPending || alert.status === "SAFE"}
                         data-testid={`button-reject-${index}`}
                       >
-                        <XCircle className="h-4 w-4 text-destructive" />
+                        <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
                   </div>

@@ -10,11 +10,8 @@ import {
   Search, 
   Eye, 
   MoreVertical, 
-  RefreshCcw,
-  AlertTriangle,
   Brain
 } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,7 +34,7 @@ import { useToast } from "@/hooks/use-toast";
 
 const STATUS_OPTIONS = [
   { label: "All", value: "" },
-  { label: "Safe", value: "SAFE" },
+  { label: "Pass", value: "PASS" },
   { label: "Flagged", value: "WARN" },
   { label: "Fraud", value: "FRAUD" },
 ];
@@ -70,7 +67,7 @@ export default function Transactions() {
     };
   }, []);
 
-  const { data, isLoading, isFetching, isError, refetch } = useQuery<PaginatedResponse<TransactionRecord>>({
+  const { data, isLoading, isFetching } = useQuery<PaginatedResponse<TransactionRecord>>({
     queryKey: ["/transactions", page, perPage, debouncedSearch, statusFilter, sortBy, sortOrder],
     queryFn: () => fetchTransactions({
       page,
@@ -88,12 +85,8 @@ export default function Transactions() {
       sendToLLM(transactionId, reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["/reviews"] });
       toast({ title: "Sent to LLM for analysis" });
       setLlmDialogOpen(false);
-    },
-    onError: () => {
-      toast({ title: "Failed to send to LLM", variant: "destructive" });
     },
   });
 
@@ -122,31 +115,14 @@ export default function Transactions() {
     setPage(1);
   };
 
-  const handleViewDetails = (transaction: TransactionRecord) => {
-    setSelectedTransaction(transaction);
-    setDetailsOpen(true);
+  const getScoreDisplay = (score: number) => {
+    const pct = (score * 100).toFixed(0);
+    if (score >= 0.8) return <Badge className="bg-destructive text-destructive-foreground">{pct}%</Badge>;
+    if (score >= 0.5) return <Badge className="bg-orange-500 text-white">{pct}%</Badge>;
+    return <span className="text-sm text-muted-foreground">{pct}%</span>;
   };
 
-  const handleSendToLLM = (transactionId: string) => {
-    setLlmTransactionId(transactionId);
-    setLlmDialogOpen(true);
-  };
-
-  const handlePageChange = (newPage: number) => {
-    setPage(newPage);
-  };
-
-  const handlePerPageChange = (newPerPage: number) => {
-    setPerPage(newPerPage);
-    setPage(1);
-  };
-
-  const handleStatusFilterChange = (value: string) => {
-    setStatusFilter(value);
-    setPage(1);
-  };
-
-  const getStatusBadge = (status: string) => {
+  const getStatusDisplay = (status: string) => {
     switch (status) {
       case "FRAUD":
         return <Badge className="bg-destructive text-destructive-foreground">Fraud</Badge>;
@@ -155,15 +131,8 @@ export default function Transactions() {
       case "SAFE":
         return <Badge variant="outline" className="text-[#00A307] border-[#00A307]">Safe</Badge>;
       default:
-        return <Badge variant="secondary">{status}</Badge>;
+        return <span className="text-sm text-muted-foreground">PASS</span>;
     }
-  };
-
-  const getEnsembleScoreBadge = (score: number) => {
-    if (score >= 0.8) return <Badge className="bg-destructive text-destructive-foreground">{(score * 100).toFixed(0)}%</Badge>;
-    if (score >= 0.5) return <Badge className="bg-orange-500 text-white">{(score * 100).toFixed(0)}%</Badge>;
-    if (score >= 0.3) return <Badge className="bg-yellow-500 text-white">{(score * 100).toFixed(0)}%</Badge>;
-    return <Badge variant="outline">{(score * 100).toFixed(0)}%</Badge>;
   };
 
   const transactions = data?.data || [];
@@ -174,8 +143,8 @@ export default function Transactions() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Transactions</h1>
-          <p className="text-base text-[#9F9F9F]">View and search all processed transactions</p>
+          <h1 className="text-[24px] font-semibold text-foreground" data-testid="text-page-title">Transactions</h1>
+          <p className="text-base text-muted-foreground">View and search all processed transactions</p>
         </div>
         <div className="flex items-center gap-3">
           <RefreshControls
@@ -186,20 +155,6 @@ export default function Transactions() {
           />
         </div>
       </div>
-
-      {isError && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Connection Error</AlertTitle>
-          <AlertDescription className="flex items-center justify-between gap-4">
-            <span>Unable to fetch transactions. Make sure the backend is running at localhost:9000.</span>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              <RefreshCcw className="h-4 w-4 mr-1" />
-              Retry
-            </Button>
-          </AlertDescription>
-        </Alert>
-      )}
 
       <Card data-testid="card-transactions">
         <CardHeader>
@@ -225,7 +180,7 @@ export default function Transactions() {
                 label="Status"
                 value={statusFilter}
                 options={STATUS_OPTIONS}
-                onChange={handleStatusFilterChange}
+                onChange={(value) => { setStatusFilter(value); setPage(1); }}
               />
             </div>
           </div>
@@ -235,50 +190,15 @@ export default function Transactions() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <SortableHeader 
-                    label="Transaction ID" 
-                    sortKey="Transaction_ID" 
-                    currentSortBy={sortBy} 
-                    currentSortOrder={sortOrder} 
-                    onSort={handleSort} 
-                  />
-                  <SortableHeader 
-                    label="User ID" 
-                    sortKey="User_ID" 
-                    currentSortBy={sortBy} 
-                    currentSortOrder={sortOrder} 
-                    onSort={handleSort} 
-                  />
-                  <SortableHeader 
-                    label="Amount" 
-                    sortKey="Transaction_Amount" 
-                    currentSortBy={sortBy} 
-                    currentSortOrder={sortOrder} 
-                    onSort={handleSort} 
-                  />
-                  <SortableHeader 
-                    label="Type" 
-                    sortKey="Transaction_Type" 
-                    currentSortBy={sortBy} 
-                    currentSortOrder={sortOrder} 
-                    onSort={handleSort} 
-                  />
+                  <SortableHeader label="Transaction ID" sortKey="Transaction_ID" currentSortBy={sortBy} currentSortOrder={sortOrder} onSort={handleSort} />
+                  <SortableHeader label="User ID" sortKey="User_ID" currentSortBy={sortBy} currentSortOrder={sortOrder} onSort={handleSort} />
+                  <SortableHeader label="Amount" sortKey="Transaction_Amount" currentSortBy={sortBy} currentSortOrder={sortOrder} onSort={handleSort} />
+                  <SortableHeader label="Type" sortKey="Transaction_Type" currentSortBy={sortBy} currentSortOrder={sortOrder} onSort={handleSort} />
                   <TableHead>Location</TableHead>
-                  <SortableHeader 
-                    label="Score" 
-                    sortKey="ensemble_score" 
-                    currentSortBy={sortBy} 
-                    currentSortOrder={sortOrder} 
-                    onSort={handleSort} 
-                  />
+                  <SortableHeader label="AI Score" sortKey="ensemble_score" currentSortBy={sortBy} currentSortOrder={sortOrder} onSort={handleSort} />
+                  <SortableHeader label="Rule Score" sortKey="rule_fraud_score" currentSortBy={sortBy} currentSortOrder={sortOrder} onSort={handleSort} />
                   <TableHead>Status</TableHead>
-                  <SortableHeader 
-                    label="Timestamp" 
-                    sortKey="Timestamp" 
-                    currentSortBy={sortBy} 
-                    currentSortOrder={sortOrder} 
-                    onSort={handleSort} 
-                  />
+                  <SortableHeader label="Timestamp" sortKey="Timestamp" currentSortBy={sortBy} currentSortOrder={sortOrder} onSort={handleSort} />
                   <TableHead className="w-[80px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -286,7 +206,7 @@ export default function Transactions() {
                 {isLoading ? (
                   Array.from({ length: 10 }).map((_, i) => (
                     <TableRow key={i}>
-                      {Array.from({ length: 9 }).map((_, j) => (
+                      {Array.from({ length: 10 }).map((_, j) => (
                         <TableCell key={j}>
                           <Skeleton className="h-4 w-full" />
                         </TableCell>
@@ -295,7 +215,7 @@ export default function Transactions() {
                   ))
                 ) : transactions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                       No transactions found
                     </TableCell>
                   </TableRow>
@@ -311,8 +231,9 @@ export default function Transactions() {
                       </TableCell>
                       <TableCell>{txn.Transaction_Type}</TableCell>
                       <TableCell>{txn.Location}</TableCell>
-                      <TableCell>{getEnsembleScoreBadge(txn.ensemble_score || 0)}</TableCell>
-                      <TableCell>{getStatusBadge(txn.status)}</TableCell>
+                      <TableCell data-testid={`text-ai-score-${index}`}>{getScoreDisplay(txn.ensemble_score || 0)}</TableCell>
+                      <TableCell data-testid={`text-rule-score-${index}`}>{getScoreDisplay(txn.rule_fraud_score || 0)}</TableCell>
+                      <TableCell data-testid={`text-status-${index}`}>{getStatusDisplay(txn.status)}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {txn.Timestamp ? new Date(txn.Timestamp).toLocaleString() : 'N/A'}
                       </TableCell>
@@ -321,7 +242,7 @@ export default function Transactions() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => handleViewDetails(txn)}
+                            onClick={() => { setSelectedTransaction(txn); setDetailsOpen(true); }}
                             data-testid={`button-view-${index}`}
                           >
                             <Eye className="h-4 w-4" />
@@ -333,11 +254,11 @@ export default function Transactions() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleViewDetails(txn)}>
+                              <DropdownMenuItem onClick={() => { setSelectedTransaction(txn); setDetailsOpen(true); }}>
                                 <Eye className="h-4 w-4 mr-2" />
                                 View Details
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleSendToLLM(txn.Transaction_ID)}>
+                              <DropdownMenuItem onClick={() => { setLlmTransactionId(txn.Transaction_ID); setLlmDialogOpen(true); }}>
                                 <Brain className="h-4 w-4 mr-2" />
                                 Send to LLM
                               </DropdownMenuItem>
@@ -357,8 +278,8 @@ export default function Transactions() {
             totalPages={totalPages}
             totalItems={totalItems}
             perPage={perPage}
-            onPageChange={handlePageChange}
-            onPerPageChange={handlePerPageChange}
+            onPageChange={setPage}
+            onPerPageChange={(v) => { setPerPage(v); setPage(1); }}
             isLoading={isLoading}
           />
         </CardContent>

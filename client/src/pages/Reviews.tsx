@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { 
   Brain, 
   CheckCircle, 
@@ -13,13 +14,11 @@ import {
   Clock, 
   User,
   Sparkles,
-  AlertTriangle,
   MapPin,
   CreditCard,
-  RefreshCcw,
-  Eye
+  Eye,
+  Search
 } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
 import Pagination from "@/components/Pagination";
 import TransactionDetailsModal from "@/components/TransactionDetailsModal";
@@ -35,13 +34,30 @@ export default function Reviews() {
   const [reviewerNotes, setReviewerNotes] = useState<Record<string, string>>({});
   const [selectedReview, setSelectedReview] = useState<Review | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [pendingOnly, setPendingOnly] = useState(false);
   
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { data, isLoading, isFetching, isError, refetch } = useQuery<PaginatedResponse<Review>>({
-    queryKey: ["/reviews", page, perPage],
-    queryFn: () => fetchReviews({ page, perPage, sortBy: "ensemble_score", sortOrder: "desc" }),
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, []);
+
+  const { data, isLoading, isFetching } = useQuery<PaginatedResponse<Review>>({
+    queryKey: ["/reviews", page, perPage, debouncedSearch, pendingOnly],
+    queryFn: () => fetchReviews({
+      page,
+      perPage,
+      search: debouncedSearch || undefined,
+      status: pendingOnly ? "WARN" : undefined,
+      sortBy: "ensemble_score",
+      sortOrder: "desc",
+    }),
     refetchInterval: refreshInterval || false,
   });
 
@@ -63,18 +79,20 @@ export default function Reviews() {
         return updated;
       });
     },
-    onError: () => {
-      toast({ title: "Failed to update verdict", variant: "destructive" });
-    },
   });
 
   const handleManualRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/reviews"] });
   };
 
-  const handleNotesChange = (transactionId: string, value: string) => {
-    setReviewerNotes((prev) => ({ ...prev, [transactionId]: value }));
-  };
+  const handleSearch = useCallback((value: string) => {
+    setSearchQuery(value);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+      setPage(1);
+    }, 300);
+  }, []);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -116,10 +134,28 @@ export default function Reviews() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Human Review Queue</h1>
-          <p className="text-base text-[#9F9F9F]">LLM-assisted transaction review with AI analysis</p>
+          <h1 className="text-[24px] font-semibold text-foreground" data-testid="text-page-title">Human Review Queue</h1>
+          <p className="text-base text-muted-foreground">LLM-assisted transaction review with AI analysis</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search transactions..."
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="pl-9 w-56"
+              data-testid="input-search-reviews"
+            />
+          </div>
+          <Button
+            variant={pendingOnly ? "default" : "outline"}
+            size="sm"
+            onClick={() => { setPendingOnly(!pendingOnly); setPage(1); }}
+            data-testid="button-pending-only"
+          >
+            Pending Only
+          </Button>
           <RefreshControls
             refreshInterval={refreshInterval}
             onRefreshIntervalChange={setRefreshInterval}
@@ -132,20 +168,6 @@ export default function Reviews() {
           </Badge>
         </div>
       </div>
-
-      {isError && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Connection Error</AlertTitle>
-          <AlertDescription className="flex items-center justify-between gap-4">
-            <span>Unable to fetch reviews. Make sure the backend is running at localhost:9000.</span>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              <RefreshCcw className="h-4 w-4 mr-1" />
-              Retry
-            </Button>
-          </AlertDescription>
-        </Alert>
-      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card data-testid="card-pending-count">
@@ -261,7 +283,7 @@ export default function Reviews() {
 
                   <div className="bg-muted/50 rounded-lg p-3 mb-4">
                     <div className="flex items-center gap-2 mb-2">
-                      <AlertTriangle className="w-4 h-4 text-orange-500" />
+                      <CreditCard className="w-4 h-4 text-muted-foreground" />
                       <span className="font-medium text-sm">Transaction Details</span>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -280,13 +302,15 @@ export default function Reviews() {
                         <p className="font-medium">{review.Location}</p>
                       </div>
                       <div>
-                        <span className="text-muted-foreground flex items-center gap-1">
-                          <CreditCard className="w-3 h-3" /> Card Age:
-                        </span>
-                        <p className="font-medium">{review.Card_Age || 0} days</p>
+                        <span className="text-muted-foreground">Card Type:</span>
+                        <p className="font-medium">{review.Card_Type}</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3 pt-3 border-t border-border">
+                      <div>
+                        <span className="text-muted-foreground">Card Age:</span>
+                        <p className="font-medium">{review.Card_Age || 0} days</p>
+                      </div>
                       <div>
                         <span className="text-muted-foreground">Daily Count:</span>
                         <p className="font-medium">{review.Daily_Transaction_Count || 0} txns</p>
@@ -299,9 +323,23 @@ export default function Reviews() {
                         <span className="text-muted-foreground">Auth Method:</span>
                         <p className="font-medium">{review.Authentication_Method}</p>
                       </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3 pt-3 border-t border-border">
+                      <div>
+                        <span className="text-muted-foreground">Device Type:</span>
+                        <p className="font-medium">{review.Device_Type}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Merchant:</span>
+                        <p className="font-medium">{review.Merchant_Category}</p>
+                      </div>
                       <div>
                         <span className="text-muted-foreground">User:</span>
                         <p className="font-medium font-mono">{review.User_ID}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Rule Fraud Score:</span>
+                        <p className="font-medium">{((review.rule_fraud_score || 0) * 100).toFixed(0)}%</p>
                       </div>
                     </div>
                   </div>
@@ -325,7 +363,7 @@ export default function Reviews() {
                         id={`notes-${review.Transaction_ID}`}
                         placeholder="Add your notes about this transaction..."
                         value={reviewerNotes[review.Transaction_ID] || ""}
-                        onChange={(e) => handleNotesChange(review.Transaction_ID, e.target.value)}
+                        onChange={(e) => setReviewerNotes(prev => ({ ...prev, [review.Transaction_ID]: e.target.value }))}
                         className="mt-1 min-h-[60px]"
                         data-testid={`textarea-notes-${index}`}
                       />

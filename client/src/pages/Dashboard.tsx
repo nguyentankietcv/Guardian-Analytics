@@ -18,9 +18,9 @@ import {
   Gavel,
   Activity,
   RefreshCcw,
-  Search
+  Search,
+  Target
 } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import RefreshControls from "@/components/RefreshControls";
 import { 
   fetchDashboardStats, 
@@ -40,25 +40,25 @@ export default function Dashboard() {
   const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
   const queryClient = useQueryClient();
 
-  const { data: stats, isLoading: statsLoading, isFetching: statsFetching, isError: statsError, refetch: refetchStats } = useQuery<DashboardStats | null>({
+  const { data: stats, isLoading: statsLoading, isFetching: statsFetching } = useQuery<DashboardStats | null>({
     queryKey: ["/dashboard/stats"],
     queryFn: fetchDashboardStats,
     refetchInterval: refreshInterval || false,
   });
 
-  const { data: recentVerdicts, isLoading: verdictsLoading, isError: verdictsError, refetch: refetchVerdicts } = useQuery<RecentVerdict[]>({
+  const { data: recentVerdicts, isLoading: verdictsLoading } = useQuery<RecentVerdict[]>({
     queryKey: ["/dashboard/recent"],
     queryFn: () => fetchRecentVerdicts(5),
     refetchInterval: refreshInterval || false,
   });
 
-  const { data: trends, isLoading: trendsLoading, isError: trendsError, refetch: refetchTrends } = useQuery<TrendDataPoint[]>({
+  const { data: trends, isLoading: trendsLoading } = useQuery<TrendDataPoint[]>({
     queryKey: ["/dashboard/trends"],
     queryFn: fetchTrends,
     refetchInterval: refreshInterval || false,
   });
 
-  const { data: systemHealth, isLoading: healthLoading, isError: healthError, refetch: refetchHealth } = useQuery<SystemHealth>({
+  const { data: systemHealth, isLoading: healthLoading } = useQuery<SystemHealth>({
     queryKey: ["/system/health"],
     queryFn: fetchSystemHealth,
     refetchInterval: refreshInterval || false,
@@ -77,13 +77,9 @@ export default function Dashboard() {
     fraud: item.fraud,
   })) || [];
 
-  const getModuleStatus = (moduleName: string): "ONLINE" | "OFFLINE" | undefined => {
-    return systemHealth?.modules?.[moduleName];
-  };
-
   const getStatusBadge = (moduleName: string) => {
     if (healthLoading) return <Skeleton className="h-5 w-12" />;
-    const status = getModuleStatus(moduleName);
+    const status = systemHealth?.modules?.[moduleName];
     if (status === "ONLINE") {
       return <Badge variant="outline" className="text-[#00A307] border-[#00A307]">Online</Badge>;
     } else if (status === "OFFLINE") {
@@ -106,17 +102,17 @@ export default function Dashboard() {
     flagged_transactions: 0,
     active_verdicts: 0,
     confirmed_fraud: 0,
+    fraud_detection_rate: 0,
     approval_rate: 0,
     avg_ensemble_score: 0,
-    avg_risk_score: 0,
   };
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-[24px] font-semibold text-[#090909]" data-testid="text-page-title">Dashboard</h1>
-          <p className="text-base text-[#9F9F9F]">Real-time transaction monitoring and fraud detection</p>
+          <h1 className="text-[24px] font-semibold text-foreground" data-testid="text-page-title">Dashboard</h1>
+          <p className="text-base text-muted-foreground">Real-time transaction monitoring and fraud detection</p>
         </div>
         <div className="flex items-center gap-3">
           <RefreshControls
@@ -131,20 +127,6 @@ export default function Dashboard() {
           </Badge>
         </div>
       </div>
-
-      {(statsError || verdictsError || trendsError || healthError) && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Connection Error</AlertTitle>
-          <AlertDescription className="flex items-center justify-between gap-4">
-            <span>Unable to fetch data from the API. Make sure the backend is running at localhost:9000.</span>
-            <Button variant="outline" size="sm" onClick={() => { refetchStats(); refetchVerdicts(); refetchTrends(); refetchHealth(); }}>
-              <RefreshCcw className="h-4 w-4 mr-1" />
-              Retry
-            </Button>
-          </AlertDescription>
-        </Alert>
-      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card data-testid="card-total-transactions">
@@ -207,17 +189,17 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card data-testid="card-pending-reviews">
+        <Card data-testid="card-confirmed-fraud">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Confirmed Fraud</CardTitle>
-            <UserCheck className="h-4 w-4 text-primary" />
+            <UserCheck className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
             {statsLoading ? (
               <Skeleton className="h-8 w-12" />
             ) : (
               <>
-                <div className="text-2xl font-bold text-primary" data-testid="stat-pending-reviews">
+                <div className="text-2xl font-bold text-destructive" data-testid="stat-confirmed-fraud">
                   {safeStats.confirmed_fraud || 0}
                 </div>
                 <p className="text-xs text-muted-foreground">Fraud confirmed</p>
@@ -228,6 +210,25 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card data-testid="card-detection-rate">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Fraud Detection Rate</CardTitle>
+            <Target className="h-4 w-4 text-primary" />
+          </CardHeader>
+          <CardContent>
+            {statsLoading ? (
+              <Skeleton className="h-8 w-20" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-primary" data-testid="stat-detection-rate">
+                  {((safeStats.fraud_detection_rate || 0) * 100).toFixed(1)}%
+                </div>
+                <p className="text-xs text-muted-foreground">{safeStats.flagged_transactions} of {safeStats.total_transactions} transactions</p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
         <Card data-testid="card-approval-rate">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Approval Rate</CardTitle>
@@ -261,25 +262,6 @@ export default function Dashboard() {
                   {((safeStats.avg_ensemble_score || 0) * 100).toFixed(0)}%
                 </div>
                 <p className="text-xs text-muted-foreground">AI model confidence</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card data-testid="card-risk-score">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Risk Score</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <>
-                <div className="text-2xl font-bold">
-                  {((safeStats.avg_risk_score || 0) * 100).toFixed(0)}%
-                </div>
-                <p className="text-xs text-muted-foreground">Transaction risk level</p>
               </>
             )}
           </CardContent>
@@ -361,7 +343,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <CardTitle>Detection Pipeline</CardTitle>
-                <CardDescription>Real-time processing status from /system/health</CardDescription>
+                <CardDescription>Real-time processing status</CardDescription>
               </div>
               {systemHealth && (
                 <Badge 
@@ -438,7 +420,7 @@ export default function Dashboard() {
                       <span className="font-medium">AI-based Fraud Check</span>
                       {getStatusBadge("module_ai_check")}
                     </div>
-                    <p className="text-sm text-muted-foreground">XGBoost + Random Forest + Neural Net ensemble</p>
+                    <p className="text-sm text-muted-foreground">DNN + XGBoost + GraphSAGE + Iso Forest + Transformer ensemble</p>
                   </div>
                 </div>
 
@@ -523,11 +505,10 @@ export default function Dashboard() {
                       <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
                         <span>${(verdict.Transaction_Amount || 0).toLocaleString()}</span>
                         <span>{verdict.Location}</span>
-                        <span>{verdict.Transaction_Type}</span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                        <Clock className="w-3 h-3" />
-                        {verdict.created_at ? new Date(verdict.created_at).toLocaleString() : 'N/A'}
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {verdict.created_at ? new Date(verdict.created_at).toLocaleString() : 'N/A'}
+                        </span>
                       </div>
                     </div>
                   </div>
